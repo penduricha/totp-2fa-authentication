@@ -2,6 +2,7 @@ import {AdminAccount} from "@/model/AdminAccount.js";
 import {TokenLogin} from "@/model/TokenLogin.js";
 import SpringConfigHeader from "@/services/spring/SpringConfigHeader.js";
 import AdminStorage from "@/local_storage/AdminStorage.js";
+import {REFRESH_OUTCOME, silentRefresher} from "@/services/auth/SilentTokenRefresher.js";
 
 const ENDPOINTS = Object.freeze({
     LOGIN: '/admin/auth/login',
@@ -15,6 +16,7 @@ const ENDPOINTS = Object.freeze({
 
 const HTTP_OK = 200;
 const HTTP_UNAUTHORIZED = 401;
+const HTTP_FORBIDDEN = 403;
 
 function assertInstanceOf(value, expectedClass, label) {
     if (!(value instanceof expectedClass)) {
@@ -94,6 +96,7 @@ export class AdminService {
     /**
      * Tự động đăng nhập bằng access token.
      * Nếu access token hết hạn (401) thì thử làm mới token rồi đăng nhập lại.
+     * Lỗi mạng / server tạm thời KHÔNG xóa phiên: chỉ trả false, token vẫn còn để lần sau thử lại.
      * @returns {Promise<boolean>} true nếu đăng nhập thành công
      */
     async getDataToAutoLoginAccessToken(tokenLogin) {
@@ -103,13 +106,51 @@ export class AdminService {
             return await this.#loginWithAccessToken(tokenLogin.getAccessToken());
         } catch (error) {
             if (error.response?.status !== HTTP_UNAUTHORIZED) {
-                console.error('Auto login error:', error);
-                this.#clearSession(tokenLogin);
+                console.warn('Auto login skipped (network/server error), session kept:', error);
                 return false;
             }
         }
 
         return this.#renewTokensAndLogin(tokenLogin);
+    }
+
+    /**
+     * Đổi refresh token lấy CẶP TOKEN MỚI (server xoay vòng: refresh token cũ bị hủy ngay).
+     * Chỉ gọi hàm này qua SilentTokenRefresher (single-flight + Web Locks), đừng gọi song song.
+     *
+     * @returns {Promise<'OK'|'REJECTED'|'TRANSIENT'>}
+     *   OK        : đã lưu token mới vào storage.
+     *   REJECTED  : server từ chối (401/403, hoặc trả 200 mà không có token): phiên đã mất -> xóa phiên cục bộ.
+     *   TRANSIENT : mất mạng, timeout, 5xx...: KHÔNG xóa gì, nơi gọi tự thử lại.
+     */
+    async refreshTokens(tokenLogin) {
+        assertInstanceOf(tokenLogin, TokenLogin, 'TokenLogin');
+
+        try {
+            const response = await this.springConfigHeader
+                .getAPIClientWithHeadersToken(tokenLogin.getRefreshToken())
+                .get(ENDPOINTS.AUTO_LOGIN_REFRESH_TOKEN);
+
+            const {accessToken, refreshToken, adminId} = response?.data?.data ?? {};
+            if (response?.status !== HTTP_OK || !accessToken || !refreshToken) {
+                // Server đã hủy refresh token cũ nhưng không cấp được token mới: phiên không còn dùng được
+                this.#clearSession(tokenLogin);
+                return REFRESH_OUTCOME.REJECTED;
+            }
+
+            this.#storeTokens(tokenLogin, accessToken, refreshToken);
+            if (adminId !== undefined && adminId !== null) this.#saveAdminId(adminId);
+            return REFRESH_OUTCOME.OK;
+        } catch (error) {
+            const status = error.response?.status;
+            if (status === HTTP_UNAUTHORIZED || status === HTTP_FORBIDDEN) {
+                console.warn('Refresh token rejected by server:', status);
+                this.#clearSession(tokenLogin);
+                return REFRESH_OUTCOME.REJECTED;
+            }
+            console.warn('Refresh token failed temporarily, session kept:', error);
+            return REFRESH_OUTCOME.TRANSIENT;
+        }
     }
 
     // ---------- Private helpers ----------
@@ -136,23 +177,24 @@ export class AdminService {
     async #renewTokensAndLogin(tokenLogin) {
         console.warn('Access token is expired. Renewing tokens...');
 
+        // Đi qua bộ làm mới ngầm để chung 1 lần gọi (single-flight) với các request / tab khác:
+        // refresh token chỉ dùng được MỘT lần, hai lần gọi song song thì lần hai bị 401 và phiên bị xóa oan.
+        // expireOnReject = false: luồng này tự xử lý "chưa đăng nhập" (không ép tải lại trang /login).
+        // Bộ làm mới chưa init (vd. chạy riêng lẻ trong test) thì gọi thẳng.
+        const refreshed = silentRefresher.isReady()
+            ? await silentRefresher.refreshNow(tokenLogin.getAccessToken(), {expireOnReject: false})
+            : (await this.refreshTokens(tokenLogin)) === REFRESH_OUTCOME.OK;
+
+        if (!refreshed) {
+            return false;
+        }
+
         try {
-            const response = await this.springConfigHeader
-                .getAPIClientWithHeadersToken(tokenLogin.getRefreshToken())
-                .get(ENDPOINTS.AUTO_LOGIN_REFRESH_TOKEN);
-
-            if (response?.status !== HTTP_OK) {
-                this.#clearSession(tokenLogin);
-                return false;
-            }
-
-            const {accessToken, refreshToken} = response.data.data;
-            this.#storeTokens(tokenLogin, accessToken, refreshToken);
-
-            return await this.#loginWithAccessToken(accessToken);
+            // Dùng token mới nhất trong storage (có thể do tab khác làm mới)
+            tokenLogin.getAccessTokenFromStorage();
+            return await this.#loginWithAccessToken(tokenLogin.getAccessToken());
         } catch (error) {
-            console.error('Refresh token failed:', error);
-            this.#clearSession(tokenLogin);
+            console.warn('Auto login after refresh failed, session kept:', error);
             return false;
         }
     }

@@ -279,9 +279,9 @@ class EnrollmentService {
   final EnrollmentAuth _auth;
   final Dio _dio;
 
-  static const String _pendingPath = '$kApiPrefix/admin/mobile/2fa/enrollment/pending';
-  static const String _confirmPath = '$kApiPrefix/admin/mobile/2fa/enrollment/confirm';
-  static const String _disablePath = '$kApiPrefix/admin/mobile/2fa/disable';
+  static const String _pendingPath = '$kApiPrefix/mobile/admin/2fa/enrollment/pending';
+  static const String _confirmPath = '$kApiPrefix/mobile/admin/2fa/enrollment/confirm';
+  static const String _disablePath = '$kApiPrefix/mobile/admin/2fa/disable';
 
   static const String _msgSession = 'Session expired. Please sign in again.';
   static const String _msgNetwork = 'Cannot reach the server. Check your connection.';

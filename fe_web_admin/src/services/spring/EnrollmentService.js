@@ -1,5 +1,6 @@
 import {TokenLogin} from "@/model/TokenLogin.js";
 import SpringConfigHeader from "@/services/spring/SpringConfigHeader.js";
+import {retryOn401} from "@/services/auth/SilentTokenRefresher.js";
 
 // Khớp các controller Spring Boot: EnrollSessionControllerWeb + EnrollmentController.
 // (Tiền tố /web do baseURL của SpringConfigHeader đã gắn, giống đường dẫn ENROLLMENT đang chạy được.)
@@ -163,12 +164,16 @@ export class EnrollmentService {
         }
 
         const baseUrl = this.springConfigHeader.getAPIClientNoHeaders().defaults.baseURL ?? '';
-        const response = await fetch(`${baseUrl}${ENDPOINTS.EVENTS}`, {
+        // 401 (access token hết TTL): làm mới ngầm rồi mở lại luồng đúng 1 lần, mỗi lần gửi đọc token mới nhất
+        const response = await retryOn401(() => fetch(`${baseUrl}${ENDPOINTS.EVENTS}`, {
             method: 'GET',
-            headers: {Authorization: `Bearer ${accessToken}`, Accept: 'text/event-stream'},
+            headers: {
+                Authorization: `Bearer ${tokenLogin.getAccessTokenFromStorage() ?? accessToken}`,
+                Accept: 'text/event-stream',
+            },
             cache: 'no-store',
             signal,
-        });
+        }), tokenLogin);
         if (!response.ok || !response.body) {
             return {opened: false, status: response.status};
         }
@@ -216,9 +221,10 @@ export class EnrollmentService {
         return dataLines.length === 0 && event === 'message' ? null : {event, data: dataLines.join('\n')};
     }
 
-    // Client gắn sẵn "Authorization: Bearer <access token mới nhất trong storage>"
+    // Client gắn "Authorization: Bearer <access token mới nhất trong storage>" cho TỪNG request,
+    // và tự làm mới token ngầm + gửi lại khi gặp 401 (xem SpringConfigHeader.getAPIClientWithSilentRefresh).
     #getAuthorizedClient(tokenLogin) {
-        return this.springConfigHeader
-            .getAPIClientWithHeadersToken(tokenLogin.getAccessTokenFromStorage());
+        assertInstanceOf(tokenLogin, TokenLogin, 'TokenLogin');
+        return this.springConfigHeader.getAPIClientWithSilentRefresh();
     }
 }

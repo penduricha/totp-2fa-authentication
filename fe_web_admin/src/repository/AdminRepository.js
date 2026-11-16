@@ -5,6 +5,7 @@ import {TokenLogin} from "@/model/TokenLogin.js";
 import {AdminService} from "@/services/spring/AdminService.js";
 import {LoginService} from "@/services/spring/LoginService.js";
 import {LoginResult} from "@/model/LoginResult.js";
+import {silentRefresher} from "@/services/auth/SilentTokenRefresher.js";
 
 // Giữ nguyên giá trị chuỗi cũ vì nơi gọi có thể đang so sánh với chúng
 export const REQUEST_STATUS = Object.freeze({
@@ -147,9 +148,14 @@ export default class AdminRepository {
         tokenLogin.setRefreshTokenToStorage();
 
         this.adminLocalStorage.setAdminIdToLocalStorage(adminAccount.getAdminId());
+
+        // Đăng nhập xong KHÔNG tải lại trang (router.push), nên phải bật làm mới ngầm ở đây;
+        // main.js chỉ bật khi trang được mở lúc đã đăng nhập sẵn.
+        silentRefresher.start();
     }
 
     #clearLoginSession(tokenLogin) {
+        silentRefresher.stop(); // đăng xuất: dừng hẹn giờ làm mới trước khi xóa token
         this.adminLocalStorage.removeAdminIdFromLocalStorage();
         tokenLogin.removeAccessTokenAndRefreshTokenFromStorage();
 

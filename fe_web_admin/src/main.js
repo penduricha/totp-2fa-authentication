@@ -175,7 +175,7 @@ async function bootstrap() {
     const targetPath = resolveTargetPath(window.location.pathname, routes, isLoggedIn)
 
     // Đã đăng nhập → chạy ngầm làm mới access token trước khi hết TTL.
-    // (Nếu đăng nhập ở trang Login mà không reload, gọi silentRefresher.start() sau khi login thành công.)
+    // (Đăng nhập ở trang Login không reload: AdminRepository gọi silentRefresher.start() sau khi login thành công.)
     if (isLoggedIn) silentRefresher.start()
 
     await mountApp(routes, targetPath)

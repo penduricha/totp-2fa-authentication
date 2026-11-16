@@ -4,8 +4,21 @@
 // Ba lớp bảo vệ:
 //   1. Chủ động : hẹn giờ, làm mới khi access token còn <= REFRESH_BEFORE_MS (đọc `exp` trong JWT).
 //   2. Thức dậy : tab nền / máy ngủ làm setTimeout bị trễ -> kiểm tra lại khi tab hiện lại hoặc có mạng lại.
-//   3. Bị động  : API trả 401 -> làm mới 1 lần rồi gửi lại request (hàm retryOn401).
+//   3. Bị động  : API trả 401 -> làm mới 1 lần rồi gửi lại request
+//                 (axios: interceptor trong SpringConfigHeader.getAPIClientWithSilentRefresh;
+//                  fetch : hàm retryOn401 ở cuối file).
 // Chống lặp: nhiều request / nhiều tab cùng hết hạn thì chỉ MỘT lần gọi refresh (single-flight + Web Locks).
+//
+// Kết quả một lần làm mới (REFRESH_OUTCOME):
+//   OK        : đã có cặp token mới trong storage.
+//   REJECTED  : server từ chối refresh token (hết hạn / bị thu hồi) -> phải đăng nhập lại.
+//   TRANSIENT : lỗi mạng / server tạm thời -> GIỮ phiên, tự thử lại, KHÔNG đăng xuất.
+
+export const REFRESH_OUTCOME = Object.freeze({
+  OK: 'OK',
+  REJECTED: 'REJECTED',
+  TRANSIENT: 'TRANSIENT',
+})
 
 const REFRESH_BEFORE_MS = 60_000            // access token sống 5 phút -> làm mới khi còn <= 60 giây
 const MIN_DELAY_MS = 5_000                  // chặn vòng lặp dày nếu server trả token có exp không đổi
@@ -35,6 +48,9 @@ class SilentTokenRefresher {
     this.retryCount = 0
     this.inflight = null
     this.started = false
+    this.expiring = false
+    /** Kết quả của lần làm mới gần nhất (REFRESH_OUTCOME). Nơi gọi đọc để phân biệt "hết phiên" và "lỗi mạng". */
+    this.lastOutcome = null
   }
 
   /** Gọi 1 lần ở main.js. */
@@ -44,9 +60,22 @@ class SilentTokenRefresher {
     this.onSessionExpired = onSessionExpired
   }
 
-  /** Bắt đầu chạy ngầm. Idempotent: gọi nhiều lần vẫn chỉ đăng ký 1 bộ listener. */
+  /** Đã init xong chưa (có đủ thứ để gọi server làm mới token). */
+  isReady() {
+    return Boolean(this.tokenLogin && this.adminService)
+  }
+
+  /**
+   * Bắt đầu chạy ngầm. Idempotent: gọi nhiều lần vẫn chỉ đăng ký 1 bộ listener.
+   * Gọi lại khi đã chạy thì chỉ hẹn lại giờ (vd. vừa đăng nhập lại, token mới).
+   */
   start() {
-    if (this.started || !this.tokenLogin) return
+    if (!this.tokenLogin) return
+    this.expiring = false
+    if (this.started) {
+      this.schedule()
+      return
+    }
     this.started = true
     document.addEventListener('visibilitychange', this.handleWake)
     window.addEventListener('online', this.handleWake)
@@ -54,13 +83,13 @@ class SilentTokenRefresher {
     this.schedule()
   }
 
-  /** Gọi khi đăng xuất. */
+  /** Gọi khi đăng xuất / hết phiên. */
   stop() {
-    if (!this.started) return
-    this.started = false
     clearTimeout(this.timer)
     clearTimeout(this.retryTimer)
     this.retryCount = 0
+    if (!this.started) return
+    this.started = false
     document.removeEventListener('visibilitychange', this.handleWake)
     window.removeEventListener('online', this.handleWake)
     window.removeEventListener('storage', this.handleStorage)
@@ -79,7 +108,7 @@ class SilentTokenRefresher {
     return decodeExpMs(this.tokenLogin.getAccessTokenFromStorage() || '')
   }
 
-  /** Còn hạn nhưng đã tới lúc làm mới? */
+  /** Còn hạn nhưng đã tới lúc làm mới (hoặc đã quá hạn)? */
   isDue() {
     const exp = this.getExpMs()
     return exp !== null && exp - Date.now() <= REFRESH_BEFORE_MS
@@ -108,21 +137,34 @@ class SilentTokenRefresher {
    * Làm mới ngay. Nhiều nơi gọi cùng lúc vẫn chỉ chạy 1 lần.
    * @param staleToken access token vừa bị server từ chối (401). Nếu storage đã có token KHÁC
    *                   (tab khác làm mới rồi) thì dùng luôn, không gọi server nữa.
-   * @returns {Promise<boolean>} true = đã có access token mới dùng được
+   * @param options.expireOnReject mặc định true: refresh token bị từ chối thì gọi onSessionExpired (về /login).
+   *                   Truyền false ở luồng tự đăng nhập lúc khởi động, vì luồng đó tự xử lý "chưa đăng nhập".
+   * @returns {Promise<boolean>} true = đã có access token mới dùng được. Lý do khi false: xem `lastOutcome`.
    */
-  refreshNow(staleToken = null) {
+  async refreshNow(staleToken = null, { expireOnReject = true } = {}) {
+    if (!this.isReady()) return false
+
     if (!this.inflight) {
       this.inflight = this.runExclusive(() => this.doRefresh(staleToken))
+          .then((outcome) => {
+            this.lastOutcome = outcome
+            this.applyOutcome(outcome)
+            return outcome
+          })
           .finally(() => { this.inflight = null })
     }
-    return this.inflight
+
+    const outcome = await this.inflight
+    if (outcome === REFRESH_OUTCOME.REJECTED && expireOnReject) this.expire()
+    return outcome === REFRESH_OUTCOME.OK
   }
 
-  /** Web Locks: chỉ 1 tab được gọi refresh tại một thời điểm (refresh token có thể bị xoay vòng). */
+  /** Web Locks: chỉ 1 tab được gọi refresh tại một thời điểm (refresh token bị xoay vòng, dùng lại lần hai sẽ 401). */
   runExclusive(fn) {
     return navigator.locks ? navigator.locks.request(LOCK_NAME, fn) : fn()
   }
 
+  /** @returns {Promise<'OK'|'REJECTED'|'TRANSIENT'>} */
   async doRefresh(staleToken) {
     const storedAccess = this.tokenLogin.getAccessTokenFromStorage()
     const storedRefresh = this.tokenLogin.getRefreshTokenFromStorage()
@@ -131,44 +173,40 @@ class SilentTokenRefresher {
     this.tokenLogin.setAccessToken(storedAccess)
     this.tokenLogin.setRefreshToken(storedRefresh)
 
-    // Tab khác đã làm mới xong trong lúc ta chờ khóa -> khỏi gọi server
-    const alreadyRefreshed = staleToken ? storedAccess !== staleToken : !this.isDue() && this.getExpMs() !== null
-    if (storedAccess && alreadyRefreshed) {
-      this.afterSuccess()
-      return true
+    // Tab khác (hoặc lần gọi trước) đã làm mới xong trong lúc ta chờ khóa -> khỏi gọi server.
+    // Token trong storage phải ĐỔI so với token vừa bị từ chối VÀ còn dùng được (chưa tới hạn làm mới);
+    // token khác nhưng cũng đã hết hạn thì vẫn phải làm mới.
+    const exp = this.getExpMs()
+    const changed = staleToken ? storedAccess !== staleToken : true
+    const usable = exp === null ? Boolean(staleToken) : !this.isDue()
+    if (storedAccess && changed && usable) return REFRESH_OUTCOME.OK
+
+    if (!storedRefresh) return REFRESH_OUTCOME.REJECTED
+
+    // Gọi ĐÚNG endpoint refresh-token. Không đi qua "auto login bằng access token": access token còn hạn
+    // (đang ở 60 giây cuối) sẽ được server chấp nhận và KHÔNG cấp token mới, nên không xoay vòng được.
+    return this.adminService.refreshTokens(this.tokenLogin)
+  }
+
+  applyOutcome(outcome) {
+    if (outcome === REFRESH_OUTCOME.OK) {
+      this.retryCount = 0
+      clearTimeout(this.retryTimer)
+      this.schedule()
+      return
     }
 
-    if (!storedRefresh) {
-      this.expire()
-      return false
-    }
-
-    try {
-      // Dùng lại đúng hàm auto login ở main.js: gửi refresh token, nhận cặp token mới
-      const ok = Boolean(await this.adminService.getDataToAutoLoginAccessToken(this.tokenLogin))
-      if (!ok) {
-        this.expire() // server từ chối refresh token (hết hạn / bị thu hồi) -> phải đăng nhập lại
-        return false
-      }
-      this.afterSuccess()
-      return true
-    } catch (error) {
+    if (outcome === REFRESH_OUTCOME.TRANSIENT) {
       // Lỗi mạng / server tạm thời: giữ phiên, thử lại sau
-      console.warn('Silent refresh failed, will retry:', error)
       const delay = RETRY_DELAYS_MS[Math.min(this.retryCount++, RETRY_DELAYS_MS.length - 1)]
       clearTimeout(this.retryTimer)
       this.retryTimer = setTimeout(() => this.refreshNow(), delay)
-      return false
     }
   }
 
-  afterSuccess() {
-    this.retryCount = 0
-    clearTimeout(this.retryTimer)
-    this.schedule()
-  }
-
   expire() {
+    if (this.expiring) return
+    this.expiring = true
     this.stop()
     this.onSessionExpired?.()
   }
@@ -182,8 +220,9 @@ export const silentRefresher = new SilentTokenRefresher()
  *
  *   const res = await retryOn401(() => fetch(url, {
  *     headers: { Authorization: `Bearer ${tokenLogin.getAccessTokenFromStorage()}` },
- *   }))
+ *   }), tokenLogin)
  *
+ * Với axios dùng SpringConfigHeader.getAPIClientWithSilentRefresh() (đã gắn sẵn interceptor).
  * KHÔNG bọc chính API login / refresh bằng hàm này (tránh lặp vô hạn).
  */
 export async function retryOn401(sendRequest, tokenLogin) {

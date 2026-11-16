@@ -206,7 +206,7 @@ export class EnrollmentRepository {
         const controller = new AbortController();
         const MIN_DELAY_MS = 1000;
         const MAX_DELAY_MS = 30000;
-        const UNAUTHORIZED_DELAY_MS = 60000; // token hết hạn: chờ axios làm mới token ở nơi khác, đừng dồn dập
+        const UNAUTHORIZED_DELAY_MS = 60000; // vẫn 401 dù đã thử làm mới ngầm (refresh token mất hiệu lực / lỗi mạng): đừng dồn dập
 
         const sleep = (ms) => new Promise((resolve) => {
             const timer = setTimeout(resolve, ms);
