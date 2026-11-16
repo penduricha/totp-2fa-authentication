@@ -4,6 +4,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import '../../../../core/storage/auth_storage.dart';
+import '../../../config/network/network_configuration.dart';
 import '../../presentation/screens/totp_generator.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 
@@ -13,11 +14,11 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 //  Web đã bấm "Kích hoạt" -> server ghi khóa (đã mã hóa AES-GCM) vào MariaDB với
 //  confirmed = false. Mobile làm 3 việc, theo đúng thứ tự:
 //
-//    1. GET  /api/admin/mobile/2fa/enrollment/pending
+//    1. GET  /api/mobile/admin/2fa/enrollment/pending
 //         -> { algorithm: "HmacSHA256", digits: 6, periodSeconds: 15|30|45|60, ... }
 //         Server KHÔNG trả khóa. Khóa chỉ có do người dùng nhập trong popup.
 //    2. Sinh mã từ (khóa người dùng nhập, thông số ở bước 1, giờ hiện tại).
-//    3. POST /api/admin/mobile/2fa/enrollment/confirm   { "code": "123456" }
+//    3. POST /api/mobile/admin/2fa/enrollment/confirm   { "code": "123456" }
 //         Server tự giải mã khóa của mình, tính mã, so khớp (lệch tối đa ±1 chu kỳ).
 //         Đúng -> confirmed = true và totp_enabled = true: 2FA bật hoàn toàn.
 //
@@ -25,27 +26,24 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 //  server xóa phần cài dở và trả 429, admin phải bấm "Kích hoạt" lại trên web.
 //
 //  TẮT 2FA (nút xóa TOTP trong app):
-//    POST /api/admin/mobile/2fa/disable   { "code": "123456" }
+//    POST /api/mobile/admin/2fa/disable   { "code": "123456" }
 //    Mã 6 số sinh từ khóa đang lưu trong app. Server đúng mới xóa credential + totp_enabled = false.
 //    Chỉ khi server báo thành công (200) hoặc "chưa bật" (404) app mới được xóa khóa cục bộ.
 // ============================================================================
 
-/// Địa chỉ Spring Boot. Đổi khi chạy:
-///   flutter run --dart-define=API_BASE_URL=http://192.168.1.10:8080
-/// Android emulator: 10.0.2.2 chính là localhost của máy tính.
-/// Máy thật: dùng IP LAN của máy chạy Spring (cùng Wi-Fi).
-// ---------- Hàm đọc .env ----------
-
-// const String kApiBaseUrl = String.fromEnvironment(
-//   'API_BASE_URL',
-//   defaultValue: 'http://10.0.2.2:8081',
-// );
-
-//run in localhost
-const String kApiBaseUrl = String.fromEnvironment(
-  'API_BASE_URL',
-  defaultValue: 'http://localhost:8081',
-);
+/// Địa chỉ gốc của Spring Boot (chưa gồm /api), lấy từ CÙNG nguồn với login / auto login / logout:
+/// file .env qua [NetworkConfiguration] (SPRING_PROTOCOL, SPRING_HOST, SPRING_PORT).
+///   - Flutter web trong Docker: host + cổng 5375 -> Nginx chuyển /api/ sang Spring (cùng origin, không CORS).
+///   - Android emulator: tự chọn 10.0.2.2:8081 (localhost trong emulator là chính emulator, không phải máy tính).
+///   - Chạy local: localhost:8081.
+/// Muốn ép một địa chỉ khác khi chạy:
+///   flutter run --dart-define=API_BASE_URL=http://192.168.1.10:8081
+String get kApiBaseUrl {
+  const override = String.fromEnvironment('API_BASE_URL');
+  if (override.isNotEmpty) return override;
+  return '${NetworkConfiguration.springProtocol}://'
+      '${NetworkConfiguration.springHost}:${NetworkConfiguration.springPort}';
+}
 
 
 /// Context-path của Spring (comment bên Java ghi /api/...). Đổi nếu khác.
