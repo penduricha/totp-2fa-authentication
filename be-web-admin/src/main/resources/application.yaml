@@ -1,0 +1,121 @@
+server:
+  port: ${SPRING_BOOT_PORT:8081}
+  servlet:
+    encoding:
+      enabled: true
+      charset: UTF-8
+      force: true
+    context-path: /api
+  # Backend chạy sau nginx/proxy thì bật để request.getRemoteAddr() trả IP thật (X-Forwarded-For).
+  # Nếu client gọi thẳng vào Spring Boot (không qua proxy) thì XÓA dòng này, vì header có thể bị giả mạo.
+  # Giá trị "framework" khớp với SERVER_FORWARD_HEADERS_STRATEGY trong docker-compose.yml.
+  forward-headers-strategy: framework
+  tomcat:
+    threads:
+      max: 20
+      min-spare: 5
+    max-connections: 1000
+    accept-count: 20
+
+gg:
+  jte:
+    developmentMode: false
+
+# ===================== CẤU HÌNH ỨNG DỤNG (2FA) =====================
+app:
+  crypto:
+    # Phiên bản khóa dùng để MÃ HÓA bản ghi mới. Được lưu vào ntt_totp_credentials.key_version.
+    # Muốn xoay khóa: thêm khóa mới vào "keys", tăng active-version, giữ khóa cũ cho đến khi
+    # không còn bản ghi nào dùng phiên bản đó.
+    active-version: 2
+    keys:
+      # Base64 của 32 byte ngẫu nhiên: openssl rand -base64 32
+      # KHÔNG có giá trị mặc định: thiếu biến môi trường thì ứng dụng không khởi động (fail-fast).
+      2: ${TOTP_MASTER_KEY_V2}
+    # Chuỗi MASTER_SECRET cũ (đã lộ trong Git). CHỈ dùng cho bước di chuyển dữ liệu một lần
+    # (giải mã bản ghi cũ bằng PBKDF2). Xóa dòng này sau khi di chuyển xong.
+    legacy-master-secret: ${TOTP_LEGACY_MASTER_SECRET:}
+  totp:
+    confirm-window-minutes: 10      # thời gian mobile phải xác nhận sau khi bấm "Kích hoạt"
+    confirm-max-attempts: 5         # số lần nhập sai mã xác nhận tối đa
+#    enroll-session-ttl-seconds: 300 # thời gian sống của khóa chờ ở Redis (modal)
+
+spring:
+  # Chỉ đọc .env khi chạy trực tiếp trên máy (java -jar / IDE).
+  # Trong Docker, biến đã được nạp qua env_file nên file này không cần tồn tại ("optional").
+  config:
+    import: "optional:file:.env[.properties]"
+
+  # Nên giữ tên trùng với project (be-web-admin) để log/monitoring dễ đọc.
+  application:
+    name: be-web-admin
+
+  # Redis: tách riêng từng thuộc tính thay vì ghép url, vì mật khẩu có ký tự đặc biệt
+  # (@ : / # ...) trong URL sẽ làm sai cú pháp và rất khó debug.
+  # Trong Docker các giá trị này bị ghi đè bởi SPRING_DATA_REDIS_* ở docker-compose.yml.
+  data:
+    redis:
+      host: ${IP_ADDRESS}
+      port: ${REDIS_PORT}
+      username: ${REDIS_USERNAME}
+      password: ${REDIS_PASSWORD}
+      database: ${REDIS_DBS}
+      connect-timeout: 2000ms
+      timeout: 1000ms
+
+  datasource:
+    # MariaDB Connector/J bỏ qua serverTimezone, useUnicode, characterEncoding (đó là tham số của MySQL
+    # Connector) và không có usePingMethod, nên bỏ cho gọn. Múi giờ được đặt ở hibernate.jdbc.time_zone bên dưới.
+    # Trong Docker, url/username/password bị ghi đè bởi SPRING_DATASOURCE_* ở docker-compose.yml.
+    url: jdbc:mariadb://${IP_ADDRESS}:${MARIADB_PORT}/${MARIADB_DBS}
+    username: ${MARIADB_USERNAME}
+    password: ${MARIADB_PASSWORD}
+    driver-class-name: org.mariadb.jdbc.Driver
+    hikari:
+      connection-timeout: 5000
+      idle-timeout: 300000
+      max-lifetime: 900000          # phải nhỏ hơn wait_timeout của MariaDB
+      minimum-idle: 5
+      maximum-pool-size: 10
+      pool-name: HikariPool-Fast
+      auto-commit: true
+      leak-detection-threshold: 20000   # cảnh báo nếu giữ kết nối quá 20s (dễ gặp khi BCrypt nằm trong transaction)
+
+  jpa:
+    open-in-view: false
+    hibernate:
+      # Mặc định "update" để container MariaDB mới (database rỗng) tự tạo bảng khi chạy lần đầu.
+      # "update" không sửa được cột ENUM/kiểu đã tồn tại, chỉ tạo cột mới và dễ gây lệch ngầm.
+      # Khi schema đã do script SQL quản lý, đặt JPA_DDL_AUTO=none (hoặc validate) trong .env, không cần sửa file này.
+      ddl-auto: ${JPA_DDL_AUTO:update}
+    # Tắt show-sql: trùng với org.hibernate.SQL và in ra console không qua logger.
+    show-sql: false
+    properties:
+      hibernate:
+        format_sql: false
+        # Cột datetime(6) ánh xạ với Instant: luôn đọc/ghi theo UTC.
+        jdbc:
+          time_zone: UTC
+          batch_size: 50
+        order_inserts: true
+        order_updates: true
+        # Second-level cache TẮT: hiện không có entity JPA nào gắn @Cache (chỉ có 2 class Redis gắn nhầm),
+        # nên bật chỉ tốn cấu hình. Cache cũng không nên chứa dữ liệu nhạy cảm (secret_cipher, code_hash).
+        # Muốn bật lại thì khóa đúng là hibernate.javax.cache.provider (không có thêm ".cache.").
+        cache:
+          use_second_level_cache: false
+          use_query_cache: false
+
+  docker:
+    compose:
+      enabled: false
+
+logging:
+  level:
+    root: INFO
+    com.zaxxer.hikari: WARN
+    # Không bật DEBUG/TRACE ở môi trường thật. BasicBinder TRACE in GIÁ TRỊ tham số của câu SQL,
+    # tức là ghi vào log hash mật khẩu, secret_cipher, iv, code_hash, refresh_token_hash.
+    # Cần debug thì đặt trong application-dev.yml (profile dev), không đặt ở file chung.
+    org.hibernate.SQL: WARN
+    org.hibernate.type.descriptor.sql.BasicBinder: WARN

@@ -1,0 +1,20 @@
+build/
+dist/
+.dart_tool/
+.idea/
+.git/
+.vscode/
+ios/
+macos/
+linux/
+windows/
+# android/ phải giữ lại để build APK, chỉ loại file sinh ra và file riêng của máy dev
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/key.properties
+*.jks
+.flutter-plugins
+.flutter-plugins-dependencies
+*.iml

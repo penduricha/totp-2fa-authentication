@@ -1,0 +1,10 @@
+# node_modules của máy chủ không được lọt vào image (khác hệ điều hành)
+node_modules
+dist
+.env
+.env.*
+.git
+.gitignore
+.vscode
+.idea
+*.log

@@ -1,0 +1,123 @@
+# ============================================================
+# be-web-admin: 3 container (Spring Boot, MariaDB, Redis)
+# Đọc biến từ file .env nằm cạnh file này (MARIADB_*, REDIS_*, TOTP_MASTER_KEY_V2...)
+# Mạng dùng chung "totp-net" do build-containers.sh tạo sẵn
+# (nếu chưa có: docker network create totp-net)
+# ============================================================
+name: totp-backend
+
+# Giới hạn dung lượng log để đĩa không đầy
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  # ---------- MariaDB (cổng 3307) ----------
+  mariadb:
+    image: mariadb:10.11
+    container_name: mariadb
+    restart: unless-stopped
+    logging: *default-logging
+    # Cho MariaDB lắng nghe ngay trong container ở cổng 3307 để khớp với .env
+    command:
+      - "--port=${MARIADB_PORT:-3307}"
+      - "--character-set-server=utf8mb4"
+      - "--collation-server=utf8mb4_unicode_ci"
+    environment:
+      MARIADB_ROOT_PASSWORD: ${MARIADB_PASSWORD}
+      MARIADB_DATABASE: ${MARIADB_DBS}          # tự tạo database theo .env (ntt_university)
+      TZ: Asia/Ho_Chi_Minh
+    # Chỉ mở cổng ra localhost của máy chủ (để dùng DBeaver qua SSH tunnel...).
+    # spring-app nối thẳng qua mạng totp-net nên không cần mở ra ngoài Internet.
+    ports:
+      - "127.0.0.1:${MARIADB_PORT:-3307}:${MARIADB_PORT:-3307}"
+    volumes:
+      - mariadb-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mariadb-admin ping -h127.0.0.1 -P${MARIADB_PORT:-3307} -uroot -p$$MARIADB_ROOT_PASSWORD --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    networks:
+      - totp-net
+
+  # ---------- Redis (cổng 6380) ----------
+  redis:
+    image: redis:7.0-alpine
+    container_name: redis
+    restart: unless-stopped
+    logging: *default-logging
+    # Redis có sẵn 16 database (0-15), Spring chỉ cần chọn database=${REDIS_DBS}
+    command:
+      - redis-server
+      - "--port"
+      - "${REDIS_PORT:-6380}"
+      - "--requirepass"
+      - "${REDIS_PASSWORD}"
+      - "--appendonly"
+      - "yes"
+    environment:
+      REDISCLI_AUTH: ${REDIS_PASSWORD}          # để healthcheck không phải gõ mật khẩu
+      TZ: Asia/Ho_Chi_Minh
+    ports:
+      - "127.0.0.1:${REDIS_PORT:-6380}:${REDIS_PORT:-6380}"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -p ${REDIS_PORT:-6380} ping | grep PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    networks:
+      - totp-net
+
+  # ---------- Spring Boot (cổng 8081) ----------
+  spring-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: totp-be                              # tên image sau khi build: totp-be:latest
+    container_name: spring-app
+    restart: unless-stopped
+    logging: *default-logging
+    depends_on:
+      mariadb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file:
+      - .env                                    # nạp TOTP_MASTER_KEY_V2 và các biến gốc
+    environment:
+      SERVER_PORT: ${SPRING_BOOT_PORT:-8081}
+      TZ: Asia/Ho_Chi_Minh
+
+      # Ghi đè theo chuẩn Spring Boot 3, trỏ thẳng tới container qua tên dịch vụ.
+      # (.env gốc dùng một IP_ADDRESS cho cả MariaDB lẫn Redis; trong Docker không dùng được
+      #  vì hai dịch vụ là hai container khác nhau, nên các biến dưới đây sẽ thay thế.)
+      SPRING_DATASOURCE_URL: jdbc:mariadb://mariadb:${MARIADB_PORT:-3307}/${MARIADB_DBS}
+      SPRING_DATASOURCE_USERNAME: ${MARIADB_USERNAME}
+      SPRING_DATASOURCE_PASSWORD: ${MARIADB_PASSWORD}
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: ${REDIS_PORT:-6380}
+      SPRING_DATA_REDIS_USERNAME: ${REDIS_USERNAME:-default}
+      SPRING_DATA_REDIS_PASSWORD: ${REDIS_PASSWORD}
+      SPRING_DATA_REDIS_DATABASE: ${REDIS_DBS:-1}
+
+      # Sau Nginx, Spring cần đọc X-Forwarded-For để rate limiting đếm đúng IP người dùng
+      SERVER_FORWARD_HEADERS_STRATEGY: framework
+      JAVA_TOOL_OPTIONS: "-XX:MaxRAMPercentage=75"
+    ports:
+      - "${SPRING_BOOT_PORT:-8081}:${SPRING_BOOT_PORT:-8081}"
+    networks:
+      - totp-net
+
+volumes:
+  mariadb-data:
+  redis-data:
+
+networks:
+  totp-net:
+    external: true

@@ -1,0 +1,56 @@
+name: totp-mobile
+
+services:
+  # ===== Môi trường 1: Flutter WEB (chạy mặc định) =====
+  flutter-web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: web
+      args:
+        FLUTTER_VERSION: ${FLUTTER_VERSION:-3.47.2}
+    image: totp-flutter-web:latest
+    container_name: flutter-web
+    restart: unless-stopped
+    ports:
+      - "${WEB_PORT:-5375}:5375"
+    # Biến môi trường lúc chạy: đổi giá trị rồi `docker compose up -d` là đủ, không cần --build.
+    # Mặc định 10.0.2.2 = địa chỉ máy tính nhìn từ Chrome trong Android emulator.
+    # Chỉ PUBLIC_HOST và WEB_PORT được đọc từ shell/.env; các giá trị còn lại ghi thẳng
+    # để Compose không đọc nhầm file .env của Flutter nằm cùng thư mục.
+    environment:
+      PUBLIC_HOST: ${PUBLIC_HOST:-10.0.2.2}
+      WEB_PORT: ${WEB_PORT:-5375}
+      SPRING_API_PREFIX: /api/mobile
+      NODEJS_PORT: "3001"
+      NODEJS_API_PREFIX: /api/mobile
+      CONNECT_TIMEOUT_SECONDS: "10"
+      SEND_TIMEOUT_SECONDS: "15"
+      RECEIVE_TIMEOUT_SECONDS: "15"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:5375/"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    networks:
+      - totp-net
+
+  # ===== Môi trường 2: APP MOBILE cho emulator (chỉ build ra file APK, không chạy thường trực) =====
+  # Dùng:  docker compose --profile apk run --rm flutter-apk
+  # Kết quả: ./dist/app-debug.apk  ->  adb install -r dist\app-debug.apk
+  flutter-apk:
+    profiles: ["apk"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: apk
+      args:
+        FLUTTER_VERSION: ${FLUTTER_VERSION:-3.47.2}
+    image: totp-flutter-apk:latest
+    volumes:
+      - ./dist:/dist
+
+networks:
+  totp-net:
+    external: true

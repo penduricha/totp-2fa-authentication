@@ -1,0 +1,6 @@
+chmod +x build-containers.sh
+./build-containers.sh up        # build và chạy cả 5 container
+./build-containers.sh ps        # xem trạng thái
+./build-containers.sh logs      # log Spring Boot
+./build-containers.sh down      # dừng, giữ dữ liệu
+./build-containers.sh clean     # dừng và xóa cả dữ liệu DB, Redis

@@ -1,0 +1,22 @@
+# Không loại .env: Dockerfile cần COPY .env vào image (app dùng dotenv-java).
+# Các biến thể khác của .env thì vẫn loại.
+.env.*
+
+.git
+.gitignore
+.idea
+.vscode
+*.iml
+
+# Kết quả build cục bộ (image tự build lại trong container)
+build
+.gradle
+out
+bin
+
+# Docker
+Dockerfile
+docker-compose*.yml
+.dockerignore
+
+*.log

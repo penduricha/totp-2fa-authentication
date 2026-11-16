@@ -1,0 +1,30 @@
+# ============================================================
+# fe_web_admin: Container 2 (Vue + Nginx, cổng 5374)
+# PUBLIC_HOST là địa chỉ mà TRÌNH DUYỆT dùng để mở web:
+#   - mở trên chính máy chạy Docker: localhost (mặc định)
+#   - mở từ máy khác trong LAN: đặt IP LAN, ví dụ PUBLIC_HOST=192.168.1.10 ./build-containers.sh up
+# ============================================================
+name: totp-frontend
+
+services:
+  vue-web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VITE_SPRING_PROTOCOL: http
+        VITE_SPRING_HOST: ${PUBLIC_HOST:-localhost}
+        VITE_SPRING_PORT: "5374"                  # gọi API qua Nginx của chính container này
+        VITE_SPRING_API_PREFIX: /api/web
+        VITE_NODEJS_HOST: ${PUBLIC_HOST:-localhost}
+        VITE_REQUEST_TIMEOUT_MS: "15000"
+    container_name: vue-web
+    restart: unless-stopped
+    ports:
+      - "5374:5374"
+    networks:
+      - totp-net
+
+networks:
+  totp-net:
+    external: true
