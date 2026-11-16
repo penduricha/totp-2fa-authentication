@@ -9,20 +9,15 @@ import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.orm.jpa.JpaSystemException;
-import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDate;
-import java.util.Arrays;
 import java.util.List;
 
 @Component
 public class DataInitializer {
 
     private final JdbcTemplate jdbcTemplate;
-
-//    @PersistenceContext
-//    private EntityManager entityManager;
 
     private final AdminRepository adminRepository;
 
@@ -46,7 +41,7 @@ public class DataInitializer {
     @EventListener(ApplicationReadyEvent.class)
     public void initializeData() throws JpaSystemException {
 
-        //set utf-8
+        // set utf-8
         List<String> codeSQLSetUtf8List = List.of(
                 "ALTER TABLE " + tableAdmin + " CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci",
                 "ALTER TABLE " + tableCourse + " CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
@@ -55,104 +50,84 @@ public class DataInitializer {
         for (String sqlStatement : codeSQLSetUtf8List) {
             try {
                 jdbcTemplate.execute(sqlStatement);
-                //System.out.println("Executed: " + sqlStatement); // Log success
             } catch (Exception e) {
                 System.err.println("Error executing: " + sqlStatement + " - " + e.getMessage());
             }
         }
 
-        Integer countCourse = jdbcTemplate.queryForObject("select count(*) from "+tableCourse, Integer.class);
+        Integer countCourse = jdbcTemplate.queryForObject("select count(*) from " + tableCourse, Integer.class);
+        Integer countAdmin = jdbcTemplate.queryForObject("select count(*) from " + tableAdmin, Integer.class);
 
-        if(countCourse == 0) {
-            String trainingSystem = "Master";
-            String branch = "An Phu Dong ward, Ho Chi Minh city.";
-            String industry = "AI (MLOPS)";
-            String faculty = "CNTT";
-            String major = "AI/ML";
-            String typeOfTraining = "Research";
-            int yearOpening = 2025;
+        // Chỉ chèn data mẫu khi cả 2 bảng đều đang trống
+        if ((countCourse == null || countCourse == 0) && (countAdmin == null || countAdmin == 0)) {
 
-            Course course = new Course();
-            course.setCourseId(8480201L);
-            course.setTrainingSystem(trainingSystem);
-            course.setBranch(branch);
-            course.setIndustry(industry);
-            course.setFaculty(faculty);
-            course.setMajor(major);
-            course.setTypeOfTraining(typeOfTraining);
-            course.setYearOpening(yearOpening);
+            // BCrypt strength 12 khá chậm -> hash 1 lần rồi dùng lại cho tất cả admin mẫu
+            String defaultPasswordHash = generateHash("1234", 12);
 
-            Integer countAdmin = jdbcTemplate.queryForObject("select count(*) from "+tableAdmin, Integer.class);
+            // ===================== COURSE 1 =====================
+            Course course1 = new Course();
+            course1.setCourseId(8480201L);
+            course1.setTrainingSystem("Master");
+            course1.setBranch("An Phu Dong ward, Ho Chi Minh city.");
+            course1.setIndustry("AI (MLOPS)");
+            course1.setFaculty("CNTT");
+            course1.setMajor("AI/ML");
+            course1.setTypeOfTraining("Research");
+            course1.setYearOpening(2025);
 
-            if(countAdmin == null || countAdmin == 0) {
-//            {
-//                "adminId" : 2500021775,
-//                    "password" : "$2a$12$FMP1aYy2CF1mxy5vY1SCTOmhac3BWH9odgC0gY1TcHgIc6pyi3mk.",
-//                    "adminName" : "Từ Quang Nhật",
-//                    "gender" : true,
-//                    "clazzName" : "25MTH1B",
-//                    "dateOfBirthAdminDay" : 25,
-//                    "dateOfBirthAdminMonth" : 12,
-//                    "dateOfBirthAdminYear" : 2003,
-//                    "courseId" : 8480201
-//            }
-//
-//            {
-//                "adminId" : 2500021773,
-//                    "password" : "$2a$12$kzkGQECR4/3miEBvmAnoa.ffuBZYNdaX9vtzMw3.ucVDi2S1vfLoO",
-//                    "adminName" : "Lương Lưu Thanh Tú",
-//                    "gender" : true,
-//                    "clazzName" : "25MTH1B",
-//                    "dateOfBirthAdminDay" : 8,
-//                    "dateOfBirthAdminMonth" : 9,
-//                    "dateOfBirthAdminYear" : 2003,
-//                    "courseId" : 8480201
-//            }
-                Admin admin1 = new Admin();
-                admin1.setAdminId(2500021775L);
-                admin1.setPassword(generateHash("1234",12));
-                admin1.setAdminName("Từ Quang Nhật");
-                admin1.setGender(true);
-                admin1.setIdCard("060203000127");
-                admin1.setAddress("467/134/20 QL1A, An Phú Đông, Tphcm.");
-                admin1.setDateOfBirthAdmin(LocalDate.of(2003,12,25));
+            addAdmin(course1, 2500021771L, defaultPasswordHash, "Từ Quang Nhật", true,
+                    "060203000127", "467/134/20 QL1A, An Phú Đông, Tphcm.", LocalDate.of(2003, 12, 25));
+            addAdmin(course1, 2500021772L, defaultPasswordHash, "Lương Lưu Thanh Tú", true,
+                    "060203000137", "467/134/2 QL1A, An Phú Đông, Tphcm.", LocalDate.of(2003, 9, 8));
+            addAdmin(course1, 2500021773L, defaultPasswordHash, "Nguyễn Minh Anh", false,
+                    "060203000147", "12 Lê Văn Khương, Thới An, Tphcm.", LocalDate.of(2002, 3, 14));
+            addAdmin(course1, 2500021774L, defaultPasswordHash, "Trần Quốc Bảo", true,
+                    "060203000157", "88 Nguyễn Ảnh Thủ, Hiệp Thành, Tphcm.", LocalDate.of(2001, 7, 21));
+            addAdmin(course1, 2500021775L, defaultPasswordHash, "Phạm Thị Hồng Nhung", false,
+                    "060203000167", "35 Tô Ký, Đông Hưng Thuận, Tphcm.", LocalDate.of(2002, 11, 5));
 
-                Admin admin2 = new Admin();
-                admin2.setAdminId(2500021773L);
-                admin2.setPassword(generateHash("1234",12));
-                admin2.setAdminName("Lương Lưu Thanh Tú");
-                admin2.setGender(true);
-                admin2.setIdCard("060203000137");
-                admin2.setAddress("467/134/2 QL1A, An Phú Đông, Tphcm.");
-                admin2.setDateOfBirthAdmin(LocalDate.of(2003,9,8));
+            // ===================== COURSE 2 =====================
+            Course course2 = new Course();
+            course2.setCourseId(8480101L);
+            course2.setTrainingSystem("Master");
+            course2.setBranch("An Phu Dong ward, Ho Chi Minh city.");
+            course2.setIndustry("Computer Science");
+            course2.setFaculty("CNTT");
+            course2.setMajor("Khoa học máy tính");
+            course2.setTypeOfTraining("Application");
+            course2.setYearOpening(2026);
 
-                Admin admin3 = new Admin();
-                admin3.setAdminId(2500021774L);
-                admin3.setPassword(generateHash("1234",12));
-                admin3.setAdminName("Quang Tú");
-                admin3.setGender(true);
-                admin3.setIdCard("060203000327");
-                admin3.setAddress("467/14/20 QL1A, An Phú Đông, Tphcm.");
-                admin3.setDateOfBirthAdmin(LocalDate.of(2003,10,8));
+            addAdmin(course2, 2600021781L, defaultPasswordHash, "Lê Hoàng Long", true,
+                    "070203000211", "21 Quang Trung, Gò Vấp, Tphcm.", LocalDate.of(2002, 1, 10));
+            addAdmin(course2, 2600021782L, defaultPasswordHash, "Võ Thị Mai", false,
+                    "070203000222", "54 Phan Văn Trị, Bình Thạnh, Tphcm.", LocalDate.of(2003, 4, 2));
+            addAdmin(course2, 2600021783L, defaultPasswordHash, "Đặng Văn Khải", true,
+                    "070203000233", "9 Nguyễn Oanh, Gò Vấp, Tphcm.", LocalDate.of(2001, 8, 19));
+            addAdmin(course2, 2600021784L, defaultPasswordHash, "Hoàng Gia Hân", false,
+                    "070203000244", "102 Lê Đức Thọ, Gò Vấp, Tphcm.", LocalDate.of(2003, 6, 30));
+            addAdmin(course2, 2600021785L, defaultPasswordHash, "Bùi Anh Tuấn", true,
+                    "070203000255", "7 Dương Quảng Hàm, Gò Vấp, Tphcm.", LocalDate.of(2002, 12, 1));
 
-                course.getAdmins().add(admin1);
-                admin1.setCourse(course);
-
-                course.getAdmins().add(admin2);
-                admin2.setCourse(course);
-
-                course.getAdmins().add(admin3);
-                admin3.setCourse(course);
-
-//                adminRepository.save(admin1);
-//                adminRepository.save(admin2);
-//                adminRepository.save(admin3);
-                courseRepository.save(course);
-            }
+            // Course -> Admin phải có cascade (CascadeType.ALL/PERSIST) thì lưu course là lưu luôn admin
+            courseRepository.saveAll(List.of(course1, course2));
         }
+    }
 
+    /**
+     * Tạo admin và gắn 2 chiều với course (giữ đồng bộ cả hai phía quan hệ).
+     */
+    private void addAdmin(Course course, Long adminId, String passwordHash, String name, boolean gender,
+                          String idCard, String address, LocalDate dateOfBirth) {
+        Admin admin = new Admin();
+        admin.setAdminId(adminId);
+        admin.setPassword(passwordHash);
+        admin.setAdminName(name);
+        admin.setGender(gender);
+        admin.setIdCard(idCard);
+        admin.setAddress(address);
+        admin.setDateOfBirthAdmin(dateOfBirth);
 
-
-
+        course.getAdmins().add(admin);
+        admin.setCourse(course);
     }
 }
