@@ -13,7 +13,7 @@ WORKDIR /app
 
 COPY package*.json ./
 RUN --mount=type=cache,target=/root/.npm \
-    if [ -f package-lock.json ]; then npm ci --legacy-peer-deps; else npm install --legacy-peer-deps; fi
+    if [ -f package-lock.json ]; then npm ci; else npm install; fi
 
 COPY . .
 
@@ -28,8 +28,6 @@ ARG VITE_NODEJS_HOST=localhost
 ARG VITE_NODEJS_PORT=3001
 ARG VITE_NODEJS_API_PREFIX=/api/web
 ARG VITE_REQUEST_TIMEOUT_MS=15000
-ARG VITE_AUTH_USERNAME=
-ARG VITE_AUTH_PASSWORD=
 
 ENV VITE_SPRING_PROTOCOL=${VITE_SPRING_PROTOCOL} \
     VITE_SPRING_HOST=${VITE_SPRING_HOST} \
@@ -39,9 +37,7 @@ ENV VITE_SPRING_PROTOCOL=${VITE_SPRING_PROTOCOL} \
     VITE_NODEJS_HOST=${VITE_NODEJS_HOST} \
     VITE_NODEJS_PORT=${VITE_NODEJS_PORT} \
     VITE_NODEJS_API_PREFIX=${VITE_NODEJS_API_PREFIX} \
-    VITE_REQUEST_TIMEOUT_MS=${VITE_REQUEST_TIMEOUT_MS} \
-    VITE_AUTH_USERNAME=${VITE_AUTH_USERNAME} \
-    VITE_AUTH_PASSWORD=${VITE_AUTH_PASSWORD}
+    VITE_REQUEST_TIMEOUT_MS=${VITE_REQUEST_TIMEOUT_MS}
 
 RUN npm run build
 

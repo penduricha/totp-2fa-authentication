@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
   Build và chạy 5 container của dự án TOTP 2FA trên Windows 10/11 (Docker Desktop).
 
@@ -186,11 +186,11 @@ function Assert-Files {
     }
 
     if (-not (Test-Path -LiteralPath $BeEnvFile -PathType Leaf)) {
-        throw "Thiếu $BeEnvFile (chứa MARIADB_*, REDIS_*, TOTP_MASTER_KEY_V2...). Tạo nhanh bằng: .\build-containers.ps1 init"
+        throw "Thiếu $BeEnvFile (chứa MARIADB_*, REDIS_*, TOTP_MASTER_KEY_V2, JWT_SECRET_BASE64...). Tạo nhanh bằng: .\build-containers.ps1 init"
     }
     $envText = Get-Content -LiteralPath $BeEnvFile -Raw
     if ($null -eq $envText) { $envText = '' }
-    foreach ($key in @('MARIADB_USERNAME', 'MARIADB_PASSWORD', 'MARIADB_DBS', 'REDIS_PASSWORD', 'TOTP_MASTER_KEY_V2')) {
+    foreach ($key in @('MARIADB_USERNAME', 'MARIADB_PASSWORD', 'MARIADB_DBS', 'REDIS_PASSWORD', 'TOTP_MASTER_KEY_V2', 'JWT_SECRET_BASE64')) {
         if ($envText -notmatch "(?m)^$key=.+") {
             throw "File .env của be-web-admin thiếu hoặc để trống: $key"
         }
@@ -332,11 +332,12 @@ function Initialize-EnvFile {
     $dbPassword    = New-RandomPassword 24
     $redisPassword = New-RandomPassword 24
     $masterKey     = New-MasterKey
+    $jwtSigningKey = New-MasterKey
 
     # Chỉ dùng ASCII trong file này: Spring đọc .env như file .properties.
     $lines = @(
         '# be-web-admin/.env  (sinh boi: build-containers.ps1 init)',
-        '# KHONG commit file nay. Dockerfile COPY no vao image vi app dung dotenv-java.',
+        '# KHONG commit file nay. Docker Compose nap secrets luc runtime; khong dong goi vao image.',
         '',
         '# Chi dung khi chay Spring Boot truc tiep tren may (IDE / java -jar).',
         '# Trong Docker, host duoc ghi de bang ten dich vu "mariadb" va "redis".',
@@ -360,6 +361,12 @@ function Initialize-EnvFile {
         '# Khoa AES (Base64 cua 32 byte ngau nhien) ma hoa secret TOTP trong MariaDB.',
         '# Mat hoac doi khoa nay thi cac secret TOTP da kich hoat khong giai ma duoc nua.',
         "TOTP_MASTER_KEY_V2=$masterKey",
+        '',
+        '# JWT HS256 signing key (Base64 cua 32 byte ngau nhien). Khong chia se hoac commit.',
+        "JWT_SECRET_BASE64=$jwtSigningKey",
+        '',
+        '# CORS: danh sach origin chinh xac, phan tach bang dau phay. Them origin HTTPS khi deploy.',
+        'CORS_ALLOWED_ORIGINS=http://localhost:5374,http://localhost:5375,http://localhost:5173',
         '',
         '# update = tu tao bang khi database con trong (lan chay dau).',
         'JPA_DDL_AUTO=update'

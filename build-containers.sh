@@ -55,10 +55,10 @@ check_files() {
 
   local envfile="$ROOT/be-web-admin/.env"
   if [[ ! -f "$envfile" ]]; then
-    red "Thiếu $envfile (chứa MARIADB_*, REDIS_*, TOTP_MASTER_KEY_V2...)."
+    red "Thiếu $envfile (chứa MARIADB_*, REDIS_*, TOTP_MASTER_KEY_V2, JWT_SECRET_BASE64...)."
     exit 1
   fi
-  for key in MARIADB_PASSWORD MARIADB_DBS REDIS_PASSWORD TOTP_MASTER_KEY_V2; do
+  for key in MARIADB_PASSWORD MARIADB_DBS REDIS_PASSWORD TOTP_MASTER_KEY_V2 JWT_SECRET_BASE64; do
     grep -Eq "^${key}=.+" "$envfile" || { red "File .env của be-web-admin thiếu hoặc để trống: $key"; exit 1; }
   done
   [[ -x "$ROOT/be-web-admin/gradlew" || -f "$ROOT/be-web-admin/gradlew" ]] || \

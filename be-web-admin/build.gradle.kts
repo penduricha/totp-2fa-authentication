@@ -48,7 +48,6 @@ dependencies {
 	runtimeOnly("io.jsonwebtoken:jjwt-jackson:0.12.5")
 
 	// Utilities
-	implementation("io.github.cdimascio:dotenv-java:3.1.0")
 	compileOnly("org.projectlombok:lombok")
 	annotationProcessor("org.projectlombok:lombok")
 

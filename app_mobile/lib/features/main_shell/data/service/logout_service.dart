@@ -5,9 +5,8 @@ import '../model/logout_result.dart';
 
 /// Gọi API đăng xuất của Spring Boot: POST /mobile/admin/auth/logout.
 ///
-/// Server nhận cặp token trong body, hủy chúng ở Redis và xóa phiên đăng nhập mobile
-/// để thiết bị khác có thể đăng nhập. Client được cấu hình validateStatus < 500 nên
-/// mã 4xx không ném lỗi mà được đổi thành [LogoutRejected].
+/// Access token được gửi bằng Authorization Bearer; refresh token trong body được ràng buộc
+/// với cùng tài khoản. Server thu hồi token trong Redis và xóa phiên đăng nhập mobile.
 class LogoutService {
   LogoutService({Dio? dio})
       : _dio = dio ?? SpringConfigHeader().getApiClientNoHeaders();
@@ -23,10 +22,8 @@ class LogoutService {
     try {
       final response = await _dio.post<Map<String, dynamic>>(
         _logoutPath,
-        data: {
-          'accessToken': accessToken,
-          'refreshToken': refreshToken,
-        },
+        data: {'refreshToken': refreshToken},
+        options: Options(headers: {'Authorization': 'Bearer $accessToken'}),
       );
       return response.statusCode == 200
           ? const LogoutSuccess()
