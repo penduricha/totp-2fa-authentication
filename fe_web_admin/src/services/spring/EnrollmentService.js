@@ -137,6 +137,7 @@ export class EnrollmentService {
         fetch(`${baseUrl}${ENDPOINTS.ENROLLMENT}`, {
             method: 'DELETE',
             headers: {Authorization: `Bearer ${accessToken}`},
+            credentials: 'include',
             keepalive: true,
         }).catch(() => {
             // best-effort: bỏ qua lỗi, đã có TTL dự phòng
@@ -171,6 +172,7 @@ export class EnrollmentService {
                 Authorization: `Bearer ${tokenLogin.getAccessTokenFromStorage() ?? accessToken}`,
                 Accept: 'text/event-stream',
             },
+            credentials: 'include',
             cache: 'no-store',
             signal,
         }), tokenLogin);

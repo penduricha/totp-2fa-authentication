@@ -17,19 +17,14 @@ export default class AdminStorage {
     //     localStorage.setItem(AdminStorage.STORAGE_KEYS.ADMIN, JSON.stringify(admin));
     // }
     /**
-     * Lưu thông tin Remember Me (adminId & password)
-     * @param {number} adminId
-     * @param {string} password
+     * Remember only the account identifier. Never persist passwords in browser storage.
+     * @param {number|string} adminId
      */
-    saveLocalStorageRememberMe(adminId, password) {
-        if (!adminId || !password) {
-            console.error('Admin ID or password is null.');
-            return;
-        }
-        const credentials = { adminId, password };
+    saveLocalStorageRememberMe(adminId) {
+        if (!adminId) return;
         localStorage.setItem(
             AdminStorage.STORAGE_KEYS.REMEMBER_LOGIN,
-            JSON.stringify(credentials)
+            JSON.stringify({ adminId: String(adminId) })
         );
     }
 
@@ -38,8 +33,23 @@ export default class AdminStorage {
      * @returns {Object}
      */
     getLocalStorageRememberMe() {
-        const data = localStorage.getItem(AdminStorage.STORAGE_KEYS.REMEMBER_LOGIN);
-        return data ? JSON.parse(data) : {};
+        const key = AdminStorage.STORAGE_KEYS.REMEMBER_LOGIN;
+        const data = localStorage.getItem(key);
+        if (!data) return {};
+        try {
+            const parsed = JSON.parse(data);
+            if (!parsed?.adminId) {
+                localStorage.removeItem(key);
+                return {};
+            }
+            // Migrate old installations by deleting the previously persisted plaintext password.
+            const safeValue = { adminId: String(parsed.adminId) };
+            localStorage.setItem(key, JSON.stringify(safeValue));
+            return safeValue;
+        } catch {
+            localStorage.removeItem(key);
+            return {};
+        }
     }
 
     /**

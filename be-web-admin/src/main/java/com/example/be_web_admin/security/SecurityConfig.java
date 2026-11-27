@@ -31,7 +31,8 @@ public class SecurityConfig {
             throws Exception {
         http
                 .cors(Customizer.withDefaults())
-                // API dùng Authorization: Bearer và không dùng cookie phiên; CSRF không phải cơ chế xác thực.
+                // Protected API calls use Bearer auth. The two cookie-authenticated endpoints (refresh/logout)
+                // additionally require SameSite=Strict and an exact allowlisted Origin.
                 .csrf(AbstractHttpConfigurer::disable)
                 .httpBasic(AbstractHttpConfigurer::disable)
                 .formLogin(AbstractHttpConfigurer::disable)
@@ -50,9 +51,8 @@ public class SecurityConfig {
                                 "/web/admin/auth/login/totp",
                                 "/mobile/admin/auth/login").permitAll()
                         // Refresh endpoint verifies token_type, signature, expiry and Redis membership itself.
-                        .requestMatchers(HttpMethod.GET,
-                                "/web/admin/auth/login/auto/refresh-token",
-                                "/mobile/admin/auth/login/auto/refresh-token").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/web/admin/auth/login/auto/refresh-token").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/mobile/admin/auth/login/auto/refresh-token").permitAll()
                         .anyRequest().authenticated())
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
         return http.build();
@@ -78,7 +78,7 @@ public class SecurityConfig {
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"));
         config.setAllowedHeaders(List.of("Authorization", "Content-Type", "Accept", "Origin", "X-Requested-With"));
         config.setExposedHeaders(List.of("Authorization"));
-        config.setAllowCredentials(false);
+        config.setAllowCredentials(true);
         config.setMaxAge(3600L);
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();

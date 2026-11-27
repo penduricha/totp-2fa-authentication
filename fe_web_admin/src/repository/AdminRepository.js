@@ -54,13 +54,12 @@ export default class AdminRepository {
      *  - Bước 2, POST /auth/login/totp (kèm totpCode): OK, TOTP_INVALID hoặc LOCKED.
      * @returns {Promise<LoginResult>}
      */
-    async getLoginResult(adminId, password, totpCode = null) {
+    async getLoginResult(adminId, password, totpCode = null, challengeId = null) {
         const adminAccount = new AdminAccount(adminId, password);
 
         try {
-            // Có mã 6 số thì gọi bước 2 (/auth/login/totp), chưa có thì gọi bước 1 (/auth/login)
-            const response = totpCode
-                ? await this.adminService.postDataToLoginTotpRequest(adminAccount, totpCode)
+            const response = challengeId && totpCode
+                ? await this.adminService.postDataToLoginTotpRequest(challengeId, totpCode)
                 : await this.adminService.postDataToLoginRequest(adminAccount);
             return this.#toLoginResult(adminAccount, response.data);
         } catch (error) {
@@ -132,9 +131,9 @@ export default class AdminRepository {
 
         switch (data?.code) {
             case LOGIN_CODE.TOTP_REQUIRED:
-                return new LoginResult(REQUEST_STATUS.TOTP_REQUIRED);
+                return new LoginResult(REQUEST_STATUS.TOTP_REQUIRED, 0, data.challengeId ?? null);
             case LOGIN_CODE.TOTP_INVALID:
-                return new LoginResult(REQUEST_STATUS.TOTP_INVALID);
+                return new LoginResult(REQUEST_STATUS.TOTP_INVALID, 0, data.challengeId ?? null);
             case LOGIN_CODE.LOCKED:
                 return new LoginResult(REQUEST_STATUS.LOCKED, Number(data.retryAfterSeconds) || 0);
             default:
@@ -142,10 +141,9 @@ export default class AdminRepository {
         }
     }
 
-    #saveLoginSession(adminAccount, {accessToken, refreshToken}) {
-        const tokenLogin = new TokenLogin(String(accessToken), String(refreshToken));
+    #saveLoginSession(adminAccount, {accessToken}) {
+        const tokenLogin = new TokenLogin(String(accessToken));
         tokenLogin.setAccessTokenToStorage();
-        tokenLogin.setRefreshTokenToStorage();
 
         this.adminLocalStorage.setAdminIdToLocalStorage(adminAccount.getAdminId());
 

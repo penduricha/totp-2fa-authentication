@@ -31,9 +31,12 @@ export default class NetworkConfiguration {
     get requestTimeout() { return readNumber("VITE_REQUEST_TIMEOUT_MS", 15000); }
 
     // ---------- Base URL ----------
-    // Call api from Spring Boot
+    // Browser builds behind the frontend Nginx use a same-origin relative URL. This avoids
+    // localhost leaks and mixed-content failures behind an HTTPS reverse proxy. Local Vite
+    // development may still opt into the explicit host/port settings from .env.
     requestSpringBoot() {
-        return `${this.springProtocol}://${this.springHost}:${this.springPort}${this.springApiPrefix}`;
+        return readString("VITE_SPRING_BASE_URL",
+            `${this.springProtocol}://${this.springHost}:${this.springPort}${this.springApiPrefix}`);
     }
 
     // Call api from NodeJS

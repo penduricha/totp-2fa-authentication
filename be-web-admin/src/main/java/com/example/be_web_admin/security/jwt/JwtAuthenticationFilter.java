@@ -32,14 +32,14 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         if ("OPTIONS".equalsIgnoreCase(request.getMethod())) return true;
         String path = request.getServletPath();
         if ("POST".equalsIgnoreCase(request.getMethod())) {
+            // Refresh tokens are validated and atomically rotated by their dedicated endpoint.
             return "/web/admin/auth/login".equals(path)
                     || "/web/admin/auth/login/totp".equals(path)
+                    || "/web/admin/auth/login/auto/refresh-token".equals(path)
                     || "/mobile/admin/auth/login".equals(path);
         }
-        // Refresh tokens are validated and atomically rotated by the refresh endpoint itself.
         return "GET".equalsIgnoreCase(request.getMethod())
-                && ("/web/admin/auth/login/auto/refresh-token".equals(path)
-                || "/mobile/admin/auth/login/auto/refresh-token".equals(path));
+                && "/mobile/admin/auth/login/auto/refresh-token".equals(path);
     }
 
     @Override

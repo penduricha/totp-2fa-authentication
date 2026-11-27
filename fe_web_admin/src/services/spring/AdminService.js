@@ -45,28 +45,20 @@ export class AdminService {
         });
     }
 
-    /**
-     * Bước 2 (khi bước 1 báo TOTP_REQUIRED): gửi lại kèm mã 6 số từ app Authenticator.
-     * @param {AdminAccount} adminAccount
-     * @param {string} totpCode
-     */
-    async postDataToLoginTotpRequest(adminAccount, totpCode) {
-        assertInstanceOf(adminAccount, AdminAccount, 'AdminAccount');
-
+    /** Complete the short-lived server challenge; do not resend the password in phase two. */
+    async postDataToLoginTotpRequest(challengeId, totpCode) {
         return this.#postWithAuthorization(ENDPOINTS.LOGIN_TOTP, {
-            adminId: adminAccount.getAdminId(),
-            password: adminAccount.getPassword(),
-            totpCode: String(totpCode),
+            challengeId: String(challengeId ?? ''),
+            totpCode: String(totpCode ?? ''),
         });
     }
 
     async postDataToLogoutRequest(tokenLogin) {
         assertInstanceOf(tokenLogin, TokenLogin, 'TokenLogin');
 
-        return this.#postWithAuthorization(ENDPOINTS.LOGOUT, {
-            accessToken: tokenLogin.getAccessTokenFromStorage(),
-            refreshToken: tokenLogin.getRefreshTokenFromStorage(),
-        });
+        return this.springConfigHeader
+            .getAPIClientWithSilentRefresh()
+            .post(ENDPOINTS.LOGOUT, {});
     }
 
     async getAdminInformationBasicRequestByAdminId(adminId) {
@@ -101,6 +93,10 @@ export class AdminService {
      */
     async getDataToAutoLoginAccessToken(tokenLogin) {
         assertInstanceOf(tokenLogin, TokenLogin, 'TokenLogin');
+        tokenLogin.getAccessTokenFromStorage();
+        if (!tokenLogin.getAccessToken()) {
+            return this.#renewTokensAndLogin(tokenLogin);
+        }
 
         try {
             return await this.#loginWithAccessToken(tokenLogin.getAccessToken());
@@ -128,23 +124,21 @@ export class AdminService {
 
         try {
             const response = await this.springConfigHeader
-                .getAPIClientWithHeadersToken(tokenLogin.getRefreshToken())
-                .get(ENDPOINTS.AUTO_LOGIN_REFRESH_TOKEN);
+                .getAPIClientNoHeaders()
+                .post(ENDPOINTS.AUTO_LOGIN_REFRESH_TOKEN, {});
 
-            const {accessToken, refreshToken, adminId} = response?.data?.data ?? {};
-            if (response?.status !== HTTP_OK || !accessToken || !refreshToken) {
-                // Server đã hủy refresh token cũ nhưng không cấp được token mới: phiên không còn dùng được
+            const {accessToken, adminId} = response?.data?.data ?? {};
+            if (response?.status !== HTTP_OK || !accessToken) {
                 this.#clearSession(tokenLogin);
                 return REFRESH_OUTCOME.REJECTED;
             }
 
-            this.#storeTokens(tokenLogin, accessToken, refreshToken);
+            this.#storeAccessToken(tokenLogin, accessToken);
             if (adminId !== undefined && adminId !== null) this.#saveAdminId(adminId);
             return REFRESH_OUTCOME.OK;
         } catch (error) {
             const status = error.response?.status;
             if (status === HTTP_UNAUTHORIZED || status === HTTP_FORBIDDEN) {
-                console.warn('Refresh token rejected by server:', status);
                 this.#clearSession(tokenLogin);
                 return REFRESH_OUTCOME.REJECTED;
             }
@@ -199,11 +193,8 @@ export class AdminService {
         }
     }
 
-    #storeTokens(tokenLogin, accessToken, refreshToken) {
+    #storeAccessToken(tokenLogin, accessToken) {
         tokenLogin.setAccessToken(accessToken);
-        tokenLogin.setRefreshToken(refreshToken);
-        tokenLogin.setAccessTokenToStorage();
-        tokenLogin.setRefreshTokenToStorage();
     }
 
     #saveAdminId(adminId) {

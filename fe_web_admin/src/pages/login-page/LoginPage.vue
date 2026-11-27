@@ -71,6 +71,7 @@ export default {
       password: "",
       rememberMe: false,
       keyAuthenticator: "",
+      challengeId: null,
       showPassword: false,
 
       // true từ lúc bấm đăng nhập đến lúc có kết quả: khoá cả form + hiện hiệu ứng load
@@ -207,12 +208,11 @@ export default {
       const password = String(this.password ?? '');
 
       this.errors.adminId = adminId ? "" : MESSAGE.ADMIN_ID_REQUIRED;
-      this.errors.password = password ? "" : MESSAGE.PASSWORD_REQUIRED;
+      this.errors.password = (this.challengeId || password) ? "" : MESSAGE.PASSWORD_REQUIRED;
 
       if (this.errors.adminId) this.shakeElement(this.$refs.boxAdminId);
       if (this.errors.password) this.shakeElement(this.$refs.boxPassword);
 
-      // focus vào ô lỗi đầu tiên
       if (this.errors.adminId) {
         this.focusField('adminId');
         return false;
@@ -222,11 +222,9 @@ export default {
         return false;
       }
 
-      // Ô khóa 6 số: để trống thì hợp lệ (tài khoản chưa cài 2FA vẫn đăng nhập được).
-      // Việc "đã cài 2FA thì bắt buộc nhập" do server quyết định (chỉ server biết, và chỉ nói sau khi mật khẩu đúng).
-      // Đã nhập thì phải đúng 6 số.
+      // TOTP is optional in phase one; a challenge requires six digits in phase two.
       const totp = String(this.keyAuthenticator ?? '').trim();
-      if (totp !== '' && !/^\d{6}$/.test(totp)) {
+      if ((this.challengeId || totp !== '') && !/^\d{6}$/.test(totp)) {
         this.errors.totp = MESSAGE.TOTP_FORMAT;
         this.shakeElement(this.$refs.boxTotp);
         this.focusField('totp');
@@ -387,26 +385,31 @@ export default {
             adminRepository.getLoginResult(
                 Number(this.adminId),
                 String(this.password),
-                String(this.keyAuthenticator ?? '').trim() || null // trống -> null (chưa cài 2FA)
+                String(this.keyAuthenticator ?? '').trim() || null,
+                this.challengeId
             ),
             LOGIN_TIMEOUT_MS
         );
 
         switch (result.getStatus()) {
           case REQUEST_STATUS.OK:
+            this.challengeId = null;
             this.handleRememberMe();
             //dang nhap thanh cong, dieu huong qua (đợi chuyển trang xong mới mở khoá form)
             await this.navigateToMainPage();
             break;
 
           case REQUEST_STATUS.TOTP_REQUIRED:
-            // Mật khẩu đúng + tài khoản đã bật 2FA nhưng ô khóa 6 số đang trống -> báo bắt buộc nhập
+            this.challengeId = result.getChallengeId();
+            this.password = ''; // Password is not sent again after the server issues the challenge.
             this.errors.totp = MESSAGE.TOTP_REQUIRED;
             this.shakeElement(this.$refs.boxTotp);
             fieldToFocus = 'totp';
             break;
 
           case REQUEST_STATUS.TOTP_INVALID:
+            this.challengeId = result.getChallengeId();
+            if (!this.challengeId) this.password = '';
             this.errors.totp = MESSAGE.TOTP_INVALID;
             this.keyAuthenticator = "";
             this.shakeElement(this.$refs.boxTotp);
@@ -422,6 +425,7 @@ export default {
             break;
 
           case REQUEST_STATUS.FAILED:
+            this.challengeId = null;
             this.keyAuthenticator = "";
             this.showWrongCredentials();
             fieldToFocus = 'password';
@@ -459,11 +463,8 @@ export default {
     },
 
     saveDataInputToLocalStorage() {
-      if (this.adminId && this.password) {
-        const adminLocalStorage = new AdminStorage();
-        adminLocalStorage.saveLocalStorageRememberMe(
-            this.adminId,
-            this.password.trim());
+      if (this.adminId) {
+        new AdminStorage().saveLocalStorageRememberMe(this.adminId);
       }
     },
 
@@ -484,12 +485,9 @@ export default {
     },
 
     setDataInputFromLocalStorage(adminFetched) {
-      if (adminFetched) {
-        let adminId = adminFetched.adminId;
-        let password = adminFetched.password;
-        const adminAccount = new AdminAccount(adminId, password);
-        this.adminId = adminAccount.getAdminId();
-        this.password = adminAccount.getPassword();
+      if (adminFetched?.adminId) {
+        this.adminId = String(adminFetched.adminId);
+        this.password = '';
       }
     }
   },
@@ -615,7 +613,7 @@ export default {
 
             <div class="box-remember-me">
               <input type="checkbox" id="rememberMe" v-model="rememberMe" class="style-checkbox"/>
-              <label for="rememberMe">Ghi nhớ đăng nhập</label>
+              <label for="rememberMe">Ghi nhớ mã quản trị viên</label>
             </div>
 
             <!-- Nếu ButtonRed render <button type="submit"> thì có thể xoá @click (form @submit đã gọi rồi) -->
@@ -652,4 +650,4 @@ export default {
 .btn-login-border-radius {
   border-radius: 4px;
 }
-</style>
+</style>

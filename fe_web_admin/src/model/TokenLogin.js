@@ -1,111 +1,69 @@
-/**
- * Class quản lý thông tin Login Token.
- */
-export class TokenLogin {
-    /** @type {string} */
-    #accessToken;
+// Browser access tokens are deliberately memory-only. The long-lived refresh token is
+// held by the server in an HttpOnly, Secure-in-production, SameSite=Strict cookie.
+let accessTokenInMemory = null;
 
-    /** @type {string} */
-    #refreshToken;
-
-    /**
-     * Khởi tạo đối tượng TokenLogin.
-     * @param {string} [accessToken] - Mã access token.
-     * @param {string} [refreshToken] - Mã refresh token.
-     */
-    constructor(accessToken, refreshToken) {
-        this.#accessToken = String(accessToken);
-        this.#refreshToken = String(refreshToken);
-    }
-
-    // ================= GETTER & SETTER =================
-
-    /**
-     * @returns {string} Access Token.
-     */
-    getAccessToken() {
-        return this.#accessToken;
-    }
-
-    /**
-     * @returns {void}
-     */
-    setAccessToken(value) {
-        this.#accessToken = String(value);
-    }
-
-    /**
-     * @returns {string} Refresh Token.
-     */
-    getRefreshToken() {
-        return this.#refreshToken;
-    }
-
-    /**
-     * @returns {void}
-     */
-    setRefreshToken(value) {
-        this.#refreshToken = String(value);
-    }
-
-    // ================= LOCALSTORAGE METHODS =================
-
-    /**
-     *
-     * @returns {void}
-     */
-    setAccessTokenToStorage() {
-        localStorage.setItem("accessToken", this.#accessToken);
-    }
-
-    /**
-     * Lấy accessToken từ localStorage và cập nhật vào thuộc tính instance.
-     * @returns {string|null} Access token từ localStorage.
-     */
-    getAccessTokenFromStorage() {
-        const token = localStorage.getItem("accessToken");
-        if (token !== null) {
-            this.#accessToken = token;
-        }
-        return token;
-    }
-
-    /**
-     *
-     * @returns {void}
-     */
-    setRefreshTokenToStorage() {
-        localStorage.setItem("refreshToken", this.#refreshToken);
-    }
-
-    /**
-     * Lấy refreshToken từ localStorage và cập nhật vào thuộc tính instance.
-     * @returns {string|null} Refresh token từ localStorage.
-     */
-    getRefreshTokenFromStorage() {
-        const token = localStorage.getItem("refreshToken");
-        if (token !== null) {
-            this.#refreshToken = token;
-        }
-        return token;
-    }
-
-    /**
-     *
-     * @returns {void}
-     */
-    removeAccessTokenAndRefreshTokenFromStorage() {
+function clearLegacyTokenStorage() {
+    try {
         localStorage.removeItem("accessToken");
         localStorage.removeItem("refreshToken");
+    } catch {
+        // Storage can be disabled in private browsing; authentication still uses the cookie.
+    }
+}
+
+clearLegacyTokenStorage();
+
+export class TokenLogin {
+    #accessToken;
+
+    constructor(accessToken = null) {
+        this.#accessToken = accessToken == null ? null : String(accessToken);
+        if (this.#accessToken) accessTokenInMemory = this.#accessToken;
     }
 
-    // ================= TO STRING =================
+    getAccessToken() {
+        return this.#accessToken ?? accessTokenInMemory;
+    }
 
-    /**
-     *
-     * @returns {string}
-     */
+    setAccessToken(value) {
+        this.#accessToken = value == null ? null : String(value);
+        accessTokenInMemory = this.#accessToken;
+    }
+
+    // Legacy API names remain for callers, but access token is never persisted.
+    setAccessTokenToStorage() {
+        accessTokenInMemory = this.#accessToken;
+    }
+
+    getAccessTokenFromStorage() {
+        this.#accessToken = accessTokenInMemory;
+        return accessTokenInMemory;
+    }
+
+    setRefreshToken() {
+        // The refresh token is HttpOnly and cannot be accessed by JavaScript.
+    }
+
+    getRefreshToken() {
+        return null;
+    }
+
+    setRefreshTokenToStorage() {
+        // Intentionally empty: do not expose/persist refresh credentials in JavaScript.
+    }
+
+    getRefreshTokenFromStorage() {
+        clearLegacyTokenStorage();
+        return null;
+    }
+
+    removeAccessTokenAndRefreshTokenFromStorage() {
+        accessTokenInMemory = null;
+        this.#accessToken = null;
+        clearLegacyTokenStorage();
+    }
+
     toString() {
-        return `TokenLogin [accessToken=${this.#accessToken}, refreshToken=${this.#refreshToken}]`;
+        return "TokenLogin [browser tokens are not serializable]";
     }
 }

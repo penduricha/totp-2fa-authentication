@@ -367,6 +367,7 @@ function Initialize-EnvFile {
         '',
         '# CORS: danh sach origin chinh xac, phan tach bang dau phay. Them origin HTTPS khi deploy.',
         'CORS_ALLOWED_ORIGINS=http://localhost:5374,http://localhost:5375,http://localhost:5173',
+        'AUTH_COOKIE_SECURE=false',
         '',
         '# update = tu tao bang khi database con trong (lan chay dau).',
         'JPA_DDL_AUTO=update'

@@ -9,9 +9,15 @@ import com.example.be_web_admin.repository.jpa.AdminRepository;
 import com.example.be_web_admin.security.jwt.user.AdminJwtTokenProvider;
 import com.example.be_web_admin.service.redis.AdminTokenService;
 import io.lettuce.core.RedisBusyException;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.HexFormat;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -26,11 +32,14 @@ public class AdminTokenServiceImpl implements AdminTokenService {
 
     private final AdminJwtTokenProvider adminJwtTokenProvider;
 
-    public AdminTokenServiceImpl(AdminAccessTokenRepository adminAccessTokenRepository, AdminRefreshTokenRepository adminRefreshTokenRepository, AdminRepository adminRepository, AdminJwtTokenProvider adminJwtTokenProvider) {
+    private final StringRedisTemplate redis;
+
+    public AdminTokenServiceImpl(AdminAccessTokenRepository adminAccessTokenRepository, AdminRefreshTokenRepository adminRefreshTokenRepository, AdminRepository adminRepository, AdminJwtTokenProvider adminJwtTokenProvider, StringRedisTemplate redis) {
         this.adminAccessTokenRepository = adminAccessTokenRepository;
         this.adminRefreshTokenRepository = adminRefreshTokenRepository;
         this.adminRepository = adminRepository;
         this.adminJwtTokenProvider = adminJwtTokenProvider;
+        this.redis = redis;
     }
 
     @Override
@@ -71,13 +80,31 @@ public class AdminTokenServiceImpl implements AdminTokenService {
 //    String refreshToken = jwtTokenProvider.generateRefreshToken(adminFound.getAdminId());
     @Override
     public boolean removeAdminRefreshTokenByJwtToken(String jwtToken) throws RedisBusyException {
+        if (jwtToken == null || !acquireRefreshConsumptionLock(jwtToken)) {
+            return false;
+        }
         AdminRefreshToken adminRefreshTokenFound = adminRefreshTokenRepository
                 .findAdminRefreshTokenByJwtToken(jwtToken);
-        if(adminRefreshTokenFound != null) {
+        if (adminRefreshTokenFound != null) {
             adminRefreshTokenRepository.delete(adminRefreshTokenFound);
             return true;
         }
         return false;
+    }
+
+    /** A server-side one-use gate prevents two concurrent refresh requests consuming one token. */
+    private boolean acquireRefreshConsumptionLock(String jwtToken) {
+        String key;
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256")
+                    .digest(jwtToken.getBytes(StandardCharsets.UTF_8));
+            key = "refresh:consumed:" + HexFormat.of().formatHex(digest);
+        } catch (NoSuchAlgorithmException impossible) {
+            throw new IllegalStateException("SHA-256 is not available", impossible);
+        }
+        // Match the refresh JWT lifetime: even an interrupted consume cannot become replayable
+        // after a short mutex timeout while the token record is still alive.
+        return Boolean.TRUE.equals(redis.opsForValue().setIfAbsent(key, "1", Duration.ofDays(30)));
     }
 
     @Override

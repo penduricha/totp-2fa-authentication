@@ -18,6 +18,7 @@ export default class SpringConfigHeader {
         return axios.create({
             baseURL: networkConfig.requestSpringBoot(),
             timeout: networkConfig.requestTimeout,
+            withCredentials: true,
             headers: {
                 "Content-Type": "application/json",
                 ...extraHeaders,
@@ -79,7 +80,7 @@ export default class SpringConfigHeader {
         const accessToken = new TokenLogin().getAccessTokenFromStorage();
         return {
             headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
-            withCredentials: false,
+            withCredentials: true,
         };
     }
 }

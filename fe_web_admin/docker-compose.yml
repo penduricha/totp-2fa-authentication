@@ -16,6 +16,7 @@ services:
         VITE_SPRING_HOST: ${PUBLIC_HOST:-localhost}
         VITE_SPRING_PORT: "5374"                  # gọi API qua Nginx của chính container này
         VITE_SPRING_API_PREFIX: /api/web
+        VITE_SPRING_BASE_URL: /api/web
         VITE_NODEJS_HOST: ${PUBLIC_HOST:-localhost}
         VITE_REQUEST_TIMEOUT_MS: "15000"
     container_name: vue-web

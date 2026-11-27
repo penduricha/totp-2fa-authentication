@@ -27,6 +27,10 @@ public class AdminLoginDTO implements Serializable {
     @ToString.Exclude
     private String totpCode;
 
+    /** Opaque, short-lived challenge returned by the password phase for Web TOTP login. */
+    @ToString.Exclude
+    private String challengeId;
+
     /** Giữ constructor 2 tham số cũ để code đang gọi new AdminLoginDTO(adminId, password) không bị lỗi. */
     public AdminLoginDTO(Long adminId, String password) {
         this.adminId = adminId;

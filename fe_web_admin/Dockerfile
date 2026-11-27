@@ -17,12 +17,13 @@ RUN --mount=type=cache,target=/root/.npm \
 
 COPY . .
 
-# Biến VITE_* được nhúng vào file JavaScript lúc build (không phải lúc chạy).
-# Trình duyệt gọi API qua chính Nginx (cổng 5374) nên Host/Port trỏ về Nginx.
+# VITE_* được nhúng lúc build. API dùng URL tương đối cùng origin; Nginx proxy /api sang Spring,
+# nên truy cập được qua HTTP local hoặc HTTPS reverse proxy mà không rò rỉ localhost/mixed content.
 ARG VITE_SPRING_PROTOCOL=http
 ARG VITE_SPRING_HOST=localhost
 ARG VITE_SPRING_PORT=5374
 ARG VITE_SPRING_API_PREFIX=/api/web
+ARG VITE_SPRING_BASE_URL=/api/web
 ARG VITE_NODEJS_PROTOCOL=http
 ARG VITE_NODEJS_HOST=localhost
 ARG VITE_NODEJS_PORT=3001
@@ -33,6 +34,7 @@ ENV VITE_SPRING_PROTOCOL=${VITE_SPRING_PROTOCOL} \
     VITE_SPRING_HOST=${VITE_SPRING_HOST} \
     VITE_SPRING_PORT=${VITE_SPRING_PORT} \
     VITE_SPRING_API_PREFIX=${VITE_SPRING_API_PREFIX} \
+    VITE_SPRING_BASE_URL=${VITE_SPRING_BASE_URL} \
     VITE_NODEJS_PROTOCOL=${VITE_NODEJS_PROTOCOL} \
     VITE_NODEJS_HOST=${VITE_NODEJS_HOST} \
     VITE_NODEJS_PORT=${VITE_NODEJS_PORT} \
@@ -76,6 +78,8 @@ server {
     location /assets/ {
         expires 1y;
         add_header Cache-Control "public, immutable";
+        add_header Content-Security-Policy "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'" always;
+        add_header Referrer-Policy no-referrer always;
         add_header X-Content-Type-Options nosniff always;
         try_files $uri =404;
     }
@@ -83,16 +87,18 @@ server {
     # index.html không cache để luôn nhận bản build mới
     location = /index.html {
         add_header Cache-Control "no-store";
+        add_header Content-Security-Policy "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'" always;
+        add_header Referrer-Policy no-referrer always;
         add_header X-Content-Type-Options nosniff always;
         add_header X-Frame-Options DENY always;
-        add_header Referrer-Policy no-referrer always;
     }
 
     # Vue Router chế độ history: đường dẫn không phải file thì trả index.html
     location / {
+        add_header Content-Security-Policy "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'" always;
+        add_header Referrer-Policy no-referrer always;
         add_header X-Content-Type-Options nosniff always;
         add_header X-Frame-Options DENY always;
-        add_header Referrer-Policy no-referrer always;
         try_files $uri $uri/ /index.html;
     }
 }

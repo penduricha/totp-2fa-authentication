@@ -70,24 +70,26 @@ flowchart LR
 
 ### Đăng nhập (một request duy nhất)
 
-`POST /api/web/admin/auth/login` với `adminId`, `password` và `totpCode` (tùy chọn):
+`POST /api/web/admin/auth/login` nhận `adminId` + `password`; nếu cần 2FA, web hoàn tất qua `POST /api/web/admin/auth/login/totp` bằng `challengeId` + `totpCode`:
 
 ```mermaid
 flowchart TD
-    A["Đăng nhập<br/>adminId + password + totpCode (tùy chọn)"] --> B{"Mật khẩu BCrypt<br/>đúng?"}
-    B -- Không --> X1["❌ success=false<br/>mã hoặc mật khẩu sai"]
+    A["Đăng nhập web: adminId + password"] --> B{"Mật khẩu BCrypt đúng?"}
+    B -- Không --> X1["BAD_CREDENTIALS<br/>thông báo chung"]
     B -- Có --> C{"Admin đã bật 2FA?"}
-    C -- Chưa --> OK["✅ Cấp accessToken + refreshToken<br/>(lưu trong Redis)"]
-    C -- Rồi --> D{"Có gửi totpCode?"}
-    D -- Không --> X2["⚠️ TOTP_REQUIRED<br/>web hiện ô nhập mã 6 số"]
-    D -- Có --> E{"Đã sai 5 lần<br/>trong 5 phút?"}
-    E -- Có --> X3["⛔ LOCKED<br/>kèm retryAfterSeconds"]
-    E -- Không --> F{"Mã đúng (lệch tối đa ±1 chu kỳ)<br/>và chưa từng dùng?"}
-    F -- Có --> OK
-    F -- Không --> X4["❌ TOTP_INVALID<br/>(lần sai thứ 5 thì LOCKED)"]
+    C -- Chưa --> OK["Cấp access token ngắn hạn<br/>refresh token trong HttpOnly cookie"]
+    C -- Rồi --> D["Tạo challenge ngẫu nhiên<br/>TTL 3 phút, gắn với IP"]
+    D --> T["POST challengeId + mã TOTP<br/>không gửi lại password"]
+    T --> E{"Mã đúng, chưa phát lại<br/>và challenge chưa dùng?"}
+    E -- Có --> OK
+    E -- Không --> F{"Đạt giới hạn thử?"}
+    F -- Có --> L["LOCKED<br/>rate-limit theo IP/tài khoản"]
+    F -- Không --> T
 ```
 
-Chỉ khi mật khẩu đã đúng thì server mới tính lần nhập sai mã, nên người không biết mật khẩu không thể cố tình khóa tài khoản của admin.
+Web không gửi lại mật khẩu ở bước TOTP. Ứng dụng mobile vẫn dùng endpoint đăng nhập riêng. Refresh token web được đặt trong cookie `HttpOnly; SameSite=Strict` và chỉ xoay vòng một lần; access token web chỉ tồn tại trong bộ nhớ JavaScript. Mọi lần đăng nhập sai đều bị giới hạn theo IP; mã TOTP còn có giới hạn theo tài khoản. Cookie refresh/logout chỉ được chấp nhận từ origin allowlist chính xác; đặt `AUTH_COOKIE_SECURE=true` khi phục vụ qua HTTPS. Bản Docker web gọi API bằng đường dẫn cùng origin `/api/web`, được Nginx proxy tới Spring để tránh mixed content và URL `localhost` trong trình duyệt.
+
+Chỉ khi mật khẩu đã đúng thì server mới tính lần nhập sai TOTP, nên người không biết mật khẩu không thể cố tình khóa tài khoản của admin.
 
 ### Bật 2FA (3 giai đoạn)
 
@@ -300,6 +302,7 @@ File `be-web-admin\.env` được Docker Compose nạp **khi chạy container**;
 | `TOTP_MASTER_KEY_V2` | Khóa AES (Base64 của 32 byte) mã hóa khóa TOTP trong MariaDB | Bắt buộc. Tạo bằng `openssl rand -base64 32` hoặc lệnh `init` |
 | `JWT_SECRET_BASE64` | Khóa ký JWT HS256 (Base64 của ít nhất 32 byte ngẫu nhiên) | Bắt buộc; `init` tự sinh. Thay khóa sẽ làm các JWT đang cấp mất hiệu lực |
 | `CORS_ALLOWED_ORIGINS` | Danh sách origin frontend được phép, phân tách bằng dấu phẩy | Mặc định local: cổng 5374, 5375, 5173; production phải dùng origin HTTPS chính xác |
+| `AUTH_COOKIE_SECURE` | Đặt cờ `Secure` cho refresh cookie web | `false` chỉ cho HTTP local; production bắt buộc `true` sau HTTPS |
 | `JPA_DDL_AUTO` | Cách Hibernate tạo bảng | `update` |
 
 > Nếu đang có `.env` từ bản cũ, hãy **thêm riêng** `JWT_SECRET_BASE64=$(openssl rand -base64 32)` (hoặc tạo bằng CSPRNG tương đương) và kiểm tra `CORS_ALLOWED_ORIGINS`. Không chạy `init -Force` trên máy đã có dữ liệu trừ khi chủ động muốn thay toàn bộ mật khẩu/khóa cũ; thay `TOTP_MASTER_KEY_V2` có thể làm mất khả năng giải mã secret TOTP.
@@ -379,5 +382,5 @@ Cấu hình hiện tại dành cho **học tập và demo trên máy cá nhân**
 - Các API thử nghiệm thêm/liệt kê admin (`POST/GET /api/web/admin`) và thao tác cache JWT chỉ được đăng ký khi bật Spring profile `dev`; không bật profile này ở môi trường thật.
 - Cổng `8081`, `5374`, `5375` mở cho mọi địa chỉ máy. Chỉ mở Firewall cho mạng tin cậy.
 - Sao lưu `TOTP_MASTER_KEY_V2` ở nơi an toàn; giữ cả `TOTP_MASTER_KEY_V2` và `JWT_SECRET_BASE64` trong secret store ngoài repo.
-- Web hiện vẫn lưu token trong `localStorage`; lỗ hổng XSS có thể đánh cắp token. Dùng HTTPS, CSP nghiêm ngặt và hạn chế script bên thứ ba; hướng production nên chuyển sang BFF/HttpOnly Secure SameSite cookie cùng CSRF protection.
+- Web không còn lưu mật khẩu hoặc refresh token trong JavaScript: refresh token nằm trong cookie HttpOnly/SameSite=Strict, access token chỉ ở bộ nhớ và được xóa khi reload/đăng xuất. Mục “Ghi nhớ” chỉ giữ mã quản trị viên. XSS vẫn có thể thực hiện thao tác trong phiên đang mở; cần HTTPS, `AUTH_COOKIE_SECURE=true`, CSP nghiêm ngặt và hạn chế script bên thứ ba.
 - Tài khoản demo `1234` và các cổng demo chỉ dành cho môi trường học tập. Bắt buộc đổi thông tin mặc định và cấu hình domain/CORS trước khi triển khai.

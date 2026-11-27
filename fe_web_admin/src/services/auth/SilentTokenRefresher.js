@@ -167,24 +167,15 @@ class SilentTokenRefresher {
   /** @returns {Promise<'OK'|'REJECTED'|'TRANSIENT'>} */
   async doRefresh(staleToken) {
     const storedAccess = this.tokenLogin.getAccessTokenFromStorage()
-    const storedRefresh = this.tokenLogin.getRefreshTokenFromStorage()
-
-    // Đồng bộ token trong bộ nhớ của tab này với storage (tab khác có thể đã đổi)
-    this.tokenLogin.setAccessToken(storedAccess)
-    this.tokenLogin.setRefreshToken(storedRefresh)
-
-    // Tab khác (hoặc lần gọi trước) đã làm mới xong trong lúc ta chờ khóa -> khỏi gọi server.
-    // Token trong storage phải ĐỔI so với token vừa bị từ chối VÀ còn dùng được (chưa tới hạn làm mới);
-    // token khác nhưng cũng đã hết hạn thì vẫn phải làm mới.
     const exp = this.getExpMs()
-    const changed = staleToken ? storedAccess !== staleToken : true
-    const usable = exp === null ? Boolean(staleToken) : !this.isDue()
+    const changed = staleToken ? storedAccess !== staleToken : false
+    const usable = exp !== null && !this.isDue()
+
+    // Another tab may already have rotated the HttpOnly cookie and installed a fresh in-memory access token.
     if (storedAccess && changed && usable) return REFRESH_OUTCOME.OK
 
-    if (!storedRefresh) return REFRESH_OUTCOME.REJECTED
-
-    // Gọi ĐÚNG endpoint refresh-token. Không đi qua "auto login bằng access token": access token còn hạn
-    // (đang ở 60 giây cuối) sẽ được server chấp nhận và KHÔNG cấp token mới, nên không xoay vòng được.
+    // The refresh credential is an HttpOnly cookie and is intentionally unreadable to JavaScript.
+    // The server atomically consumes/rotates it and returns only a short-lived access token.
     return this.adminService.refreshTokens(this.tokenLogin)
   }
 
