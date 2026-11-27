@@ -244,7 +244,7 @@ public class AdminLoginServiceImpl {
         if (count != null && count == 1L) {
             redis.expire(failKey, TOTP_FAIL_WINDOW);
         }
-        long ipRetryAfter = recordIpFailure(ip);
+        ipRetryAfter = recordIpFailure(ip);
         // Không ghi mã người dùng nhập vào log
         auditService.log(adminId, AuthEvent.TOTP_LOGIN_FAILED, false, ip, userAgent,
                 outcome.result() == TotpLoginVerifier.Result.REPLAYED ? "replayed code" : "wrong code");
