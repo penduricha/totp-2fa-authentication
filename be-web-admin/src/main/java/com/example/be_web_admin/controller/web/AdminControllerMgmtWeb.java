@@ -10,6 +10,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.HashMap;
@@ -17,7 +18,6 @@ import java.util.Map;
 
 @RestController
 @RequestMapping("/web/admin")
-@CrossOrigin(origins = "*", allowedHeaders = "*")
 public class AdminControllerMgmtWeb {
 
     private final AdminServiceImpl adminService;
@@ -88,26 +88,34 @@ public class AdminControllerMgmtWeb {
 
 
     @PostMapping("/auth/logout")
-    public ResponseEntity<?> logoutAdmin(@RequestBody Map<String, Object> adminRequestLogout) {
+    public ResponseEntity<?> logoutAdmin(
+            @RequestBody(required = false) Map<String, Object> requestBody,
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            Authentication authentication) {
+        String accessToken = bearerToken(authorization);
+        String bodyAccessToken = requestBody != null && requestBody.get("accessToken") instanceof String value
+                ? value : null;
+        String refreshToken = requestBody != null && requestBody.get("refreshToken") instanceof String value
+                ? value : null;
+        Long authenticatedAdminId = Long.valueOf(authentication.getName());
 
-        String accessToken = (String) adminRequestLogout.get("accessToken");
-        String refreshToken = (String) adminRequestLogout.get("refreshToken");
-
-        Map<String, Object> responseReturn = new HashMap<>();
-
-        try {
-            adminTokenService.removeAdminAccessTokenByJwtToken(accessToken);
-            adminTokenService.removeAdminRefreshTokenByJwtToken(refreshToken);
-        } catch(Exception e) {
-            System.out.println("Exception logout:"+ e.getMessage());
-            responseReturn.put("status", 401);
-            responseReturn.put("message", "Can't remove access token or refresh token.");
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(responseReturn);
+        // Never let a caller revoke another user's session by supplying arbitrary token strings.
+        if (accessToken == null || !accessToken.equals(bodyAccessToken)
+                || refreshToken == null || !adminJwtTokenProvider.validateRefreshToken(refreshToken)
+                || !authenticatedAdminId.equals(adminJwtTokenProvider.getAdminIdFromToken(refreshToken))
+                || !adminTokenService.findAdminRefreshTokenByJwtToken(refreshToken)) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(Map.of("success", false, "message", "Invalid session tokens."));
         }
 
-        responseReturn.put("status", HttpStatus.OK.value());
-        responseReturn.put("message", "Log out successfully.");
-        return ResponseEntity.ok(responseReturn);
+        adminTokenService.removeAdminAccessTokenByJwtToken(accessToken);
+        adminTokenService.removeAdminRefreshTokenByJwtToken(refreshToken);
+        return ResponseEntity.ok(Map.of("status", HttpStatus.OK.value(), "message", "Log out successfully."));
+    }
+
+    private String bearerToken(String authorization) {
+        return authorization != null && authorization.startsWith("Bearer ")
+                ? authorization.substring(7).trim() : null;
     }
 
     @GetMapping("/auth/login/auto/access-token")
@@ -127,7 +135,7 @@ public class AdminControllerMgmtWeb {
         String jwtToken = authHeader.substring(7);
 
         // 3. Verify chữ ký & hạn sử dụng JWT Token
-        if (!adminJwtTokenProvider.validateToken(jwtToken)) {
+        if (!adminJwtTokenProvider.validateAccessToken(jwtToken)) {
             Map<String, Object> responseInvalid = new HashMap<>();
             responseInvalid.put("success", false);
             responseInvalid.put("message", "Token is invalid or expired.");
@@ -175,7 +183,7 @@ public class AdminControllerMgmtWeb {
         String jwtToken = authHeader.substring(7);
 
         // 3. Verify chữ ký & hạn sử dụng JWT Token
-        if (!adminJwtTokenProvider.validateToken(jwtToken)) {
+        if (!adminJwtTokenProvider.validateRefreshToken(jwtToken)) {
             Map<String, Object> responseInvalid = new HashMap<>();
             responseInvalid.put("success", false);
             responseInvalid.put("message", "Token is invalid or expired.");
@@ -214,7 +222,10 @@ public class AdminControllerMgmtWeb {
 
     @GetMapping ("/information/basic")
     //@RequestHeader(value = "Authorization", required = false) String authHeader
-    public ResponseEntity<?> getAdminInformationBasic(@RequestParam Long adminId) throws RuntimeException {
+    public ResponseEntity<?> getAdminInformationBasic(@RequestParam Long adminId, Authentication authentication) throws RuntimeException {
+        if (!isOwnAccount(adminId, authentication)) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("success", false, "message", "Forbidden"));
+        }
         Map<String, Object> responseHttp = new HashMap<>();
         Map<String, Object> responseData = adminService.getAdminInfo(adminId);
 
@@ -231,7 +242,10 @@ public class AdminControllerMgmtWeb {
 
     @GetMapping ("/information/detail")
     //@RequestHeader(value = "Authorization", required = false) String authHeader
-    public ResponseEntity<?> getAdminInformationDetail(@RequestParam Long adminId) throws RuntimeException {
+    public ResponseEntity<?> getAdminInformationDetail(@RequestParam Long adminId, Authentication authentication) throws RuntimeException {
+        if (!isOwnAccount(adminId, authentication)) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("success", false, "message", "Forbidden"));
+        }
         Map<String, Object> responseHttp = new HashMap<>();
         Map<String, Object> responseData = adminService.getAdminDetailInformation(adminId);
 
@@ -269,6 +283,11 @@ public class AdminControllerMgmtWeb {
     public ResponseEntity<?> loginAdmin(@RequestBody AdminLoginDTO req, HttpServletRequest http) {
         LoginOutcome outcome = adminLoginService.login(req, http.getRemoteAddr(), http.getHeader("User-Agent"));
         return ResponseEntity.ok(buildLoginResponse(outcome, req.getAdminId()));
+    }
+
+    private boolean isOwnAccount(Long requestedAdminId, Authentication authentication) {
+        return authentication != null && requestedAdminId != null
+                && requestedAdminId.toString().equals(authentication.getName());
     }
 
     private Map<String, Object> buildLoginResponse(LoginOutcome outcome, Long adminId) {

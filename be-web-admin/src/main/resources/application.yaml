@@ -23,6 +23,12 @@ gg:
 
 # ===================== CẤU HÌNH ỨNG DỤNG (2FA) =====================
 app:
+  jwt:
+    # Base64-encoded random key, at least 32 bytes for HS256. No source-code fallback by design.
+    secret-base64: ${JWT_SECRET_BASE64}
+  security:
+    # Comma-separated exact origins; configure the real HTTPS frontend origin in deployment.
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5374,http://localhost:5375,http://localhost:5173}
   crypto:
     # Phiên bản khóa dùng để MÃ HÓA bản ghi mới. Được lưu vào ntt_totp_credentials.key_version.
     # Muốn xoay khóa: thêm khóa mới vào "keys", tăng active-version, giữ khóa cũ cho đến khi

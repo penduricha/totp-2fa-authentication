@@ -13,6 +13,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.HashMap;
@@ -22,7 +23,6 @@ import java.util.Optional;
 @Slf4j
 @RestController
 @RequestMapping("/mobile/admin")
-@CrossOrigin(origins = "*", allowedHeaders = "*")
 public class AdminControllerMgmtMobile {
 
     private final AdminServiceImpl adminService;
@@ -116,45 +116,40 @@ public class AdminControllerMgmtMobile {
     }
 
     // ===================== LOGOUT =====================
-    //    Request: { "accessToken": "...", "refreshToken": "..." }
+    // Access token is authenticated by the central filter; refresh token is bound to that same admin.
     @PostMapping("/auth/logout")
-    public ResponseEntity<?> logoutAdminMobile(@RequestBody Map<String, Object> adminRequestLogout) {
+    public ResponseEntity<?> logoutAdminMobile(
+            @RequestBody(required = false) Map<String, Object> requestBody,
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            Authentication authentication) {
+        String accessToken = bearerToken(authorization);
+        String refreshToken = requestBody != null && requestBody.get("refreshToken") instanceof String value
+                ? value : null;
+        Long adminId = Long.valueOf(authentication.getName());
 
-        String accessToken = toStringOrNull(adminRequestLogout.get("accessToken"));
-        String refreshToken = toStringOrNull(adminRequestLogout.get("refreshToken"));
-
-        Map<String, Object> responseReturn = new HashMap<>();
-
-        if (accessToken == null && refreshToken == null) {
-            responseReturn.put("status", HttpStatus.BAD_REQUEST.value());
-            responseReturn.put("message", "Missing access token and refresh token.");
-            return ResponseEntity.badRequest().body(responseReturn);
+        if (accessToken == null || refreshToken == null
+                || !adminJwtTokenProvider.validateRefreshToken(refreshToken)
+                || !adminId.equals(adminJwtTokenProvider.getAdminIdFromToken(refreshToken))
+                || !adminTokenService.findAdminRefreshTokenByJwtToken(refreshToken)) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(errorBody("Invalid session tokens."));
         }
-
-        // Lấy adminId trước khi xoá token (ưu tiên refresh token vì sống lâu hơn).
-        Long adminId = resolveAdminId(refreshToken, accessToken);
 
         try {
-            if (accessToken != null) {
-                adminTokenService.removeAdminAccessTokenByJwtToken(accessToken);
-            }
-            if (refreshToken != null) {
-                adminTokenService.removeAdminRefreshTokenByJwtToken(refreshToken);
-            }
-            // Xoá phiên đăng nhập mobile để thiết bị khác có thể đăng nhập.
-            if (adminId != null) {
-                sessionLoginMobileService.removeByAdminId(adminId);
-            }
+            adminTokenService.removeAdminAccessTokenByJwtToken(accessToken);
+            adminTokenService.removeAdminRefreshTokenByJwtToken(refreshToken);
+            sessionLoginMobileService.removeByAdminId(adminId);
         } catch (Exception e) {
             log.error("Exception logout mobile: {}", e.getMessage());
-            responseReturn.put("status", 401);
-            responseReturn.put("message", "Can't remove access token, refresh token or mobile session.");
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(responseReturn);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(errorBody("Can't revoke the mobile session."));
         }
+        return ResponseEntity.ok(Map.of("status", HttpStatus.OK.value(), "message", "Log out successfully."));
+    }
 
-        responseReturn.put("status", HttpStatus.OK.value());
-        responseReturn.put("message", "Log out successfully.");
-        return ResponseEntity.ok(responseReturn);
+    private String bearerToken(String authorization) {
+        return authorization != null && authorization.startsWith("Bearer ")
+                ? authorization.substring(7).trim() : null;
     }
 
     // ===================== AUTO LOGIN BẰNG ACCESS TOKEN =====================
@@ -172,7 +167,7 @@ public class AdminControllerMgmtMobile {
         String jwtToken = authHeader.substring(7);
 
         // 3. Verify chữ ký & hạn sử dụng JWT Token
-        if (!adminJwtTokenProvider.validateToken(jwtToken)) {
+        if (!adminJwtTokenProvider.validateAccessToken(jwtToken)) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                     .body(errorBody("Token is invalid or expired."));
         }
@@ -217,7 +212,7 @@ public class AdminControllerMgmtMobile {
         String jwtToken = authHeader.substring(7);
 
         // 3. Verify chữ ký & hạn sử dụng JWT Token
-        if (!adminJwtTokenProvider.validateToken(jwtToken)) {
+        if (!adminJwtTokenProvider.validateRefreshToken(jwtToken)) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                     .body(errorBody("Token is invalid or expired."));
         }
@@ -335,20 +330,6 @@ public class AdminControllerMgmtMobile {
         } catch (Exception e) {
             log.error("Can't revoke tokens issued for rejected mobile login: {}", e.getMessage());
         }
-    }
-
-    private Long resolveAdminId(String... jwtTokens) {
-        for (String jwtToken : jwtTokens) {
-            if (jwtToken == null) continue;
-            try {
-                if (adminJwtTokenProvider.validateToken(jwtToken)) {
-                    return adminJwtTokenProvider.getAdminIdFromToken(jwtToken);
-                }
-            } catch (Exception e) {
-                log.warn("Can't read adminId from token: {}", e.getMessage());
-            }
-        }
-        return null;
     }
 
     private Long toLong(Object value) {

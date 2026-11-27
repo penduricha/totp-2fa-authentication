@@ -161,13 +161,13 @@ cd totp-2fa-authentication
 
 **Bước 2. Mở Docker Desktop** và đợi đến khi báo *Engine running*.
 
-**Bước 3. Tạo file cấu hình** `be-web-admin\.env` (chứa mật khẩu và khóa, **không có sẵn trong repo**). Lệnh này tự sinh mật khẩu và khóa ngẫu nhiên:
+**Bước 3. Tạo file cấu hình** `be-web-admin\.env` (chứa mật khẩu và khóa, không commit). Lệnh này tự sinh mật khẩu DB/Redis cùng khóa TOTP/JWT ngẫu nhiên:
 
 ```powershell
 .\build-containers.bat init
 ```
 
-> Muốn tự điền tay: `copy be-web-admin\.env.example be-web-admin\.env` rồi sửa các giá trị `change-me-...`.
+> Có thể tham khảo `be-web-admin\.env.example`, nhưng phải thay toàn bộ giá trị `change-me-...` bằng secrets ngẫu nhiên trước khi chạy.
 
 **Bước 4. Kiểm tra máy rồi chạy:**
 
@@ -263,26 +263,27 @@ Trong emulator, `localhost` là chính emulator. App tự dùng `10.0.2.2:8081` 
 ### Mở web từ máy khác trong mạng LAN
 
 1. Lấy IP của máy Windows (`ipconfig`, ví dụ `192.168.1.10`).
-2. Chạy lại với địa chỉ đó (địa chỉ được nhúng vào bản build nên cần `up` lại):
+2. Thêm các origin frontend vào `CORS_ALLOWED_ORIGINS` trong `be-web-admin\\.env` (ví dụ `http://192.168.1.10:5374,http://192.168.1.10:5375`), sau đó chạy lại để Spring nạp cấu hình mới. Origin CORS phải là đúng scheme + host + port; không dùng `*`.
+3. Chạy lại với địa chỉ đó (địa chỉ được nhúng vào bản build nên cần `up` lại):
 
    ```powershell
    .\build-containers.bat up -PublicHost 192.168.1.10
    ```
 
-3. Mở cổng trong Windows Firewall (PowerShell **quyền Administrator**):
+4. Mở cổng trong Windows Firewall (PowerShell **quyền Administrator**):
 
    ```powershell
    New-NetFirewallRule -DisplayName "TOTP 2FA (5374,5375,8081)" -Direction Inbound `
      -Protocol TCP -LocalPort 5374,5375,8081 -Action Allow -Profile Private
    ```
 
-4. Từ máy khác mở `http://192.168.1.10:5374`.
+5. Từ máy khác mở `http://192.168.1.10:5374`.
 
 ---
 
 ## 🔧 Cấu hình `.env`
 
-File `be-web-admin\.env` được `docker compose` đọc và cũng được copy vào image Spring Boot (app dùng `dotenv-java`). File này **nằm trong `.gitignore`**, chỉ có mẫu `be-web-admin\.env.example`.
+File `be-web-admin\.env` được Docker Compose nạp **khi chạy container**; Docker build context và image không chứa file này. Khi chạy Spring trực tiếp, Spring Boot đọc `.env` qua cấu hình import tùy chọn. File `.env` chứa secrets và phải được giữ ngoài Git.
 
 | Biến | Ý nghĩa | Giá trị mặc định / lưu ý |
 |---|---|---|
@@ -297,7 +298,11 @@ File `be-web-admin\.env` được `docker compose` đọc và cũng được cop
 | `REDIS_PASSWORD` | Mật khẩu Redis | Bắt buộc |
 | `REDIS_DBS` | Số database Redis | `1` |
 | `TOTP_MASTER_KEY_V2` | Khóa AES (Base64 của 32 byte) mã hóa khóa TOTP trong MariaDB | Bắt buộc. Tạo bằng `openssl rand -base64 32` hoặc lệnh `init` |
+| `JWT_SECRET_BASE64` | Khóa ký JWT HS256 (Base64 của ít nhất 32 byte ngẫu nhiên) | Bắt buộc; `init` tự sinh. Thay khóa sẽ làm các JWT đang cấp mất hiệu lực |
+| `CORS_ALLOWED_ORIGINS` | Danh sách origin frontend được phép, phân tách bằng dấu phẩy | Mặc định local: cổng 5374, 5375, 5173; production phải dùng origin HTTPS chính xác |
 | `JPA_DDL_AUTO` | Cách Hibernate tạo bảng | `update` |
+
+> Nếu đang có `.env` từ bản cũ, hãy **thêm riêng** `JWT_SECRET_BASE64=$(openssl rand -base64 32)` (hoặc tạo bằng CSPRNG tương đương) và kiểm tra `CORS_ALLOWED_ORIGINS`. Không chạy `init -Force` trên máy đã có dữ liệu trừ khi chủ động muốn thay toàn bộ mật khẩu/khóa cũ; thay `TOTP_MASTER_KEY_V2` có thể làm mất khả năng giải mã secret TOTP.
 
 > [!WARNING]
 > - **Đổi `MARIADB_PASSWORD` hoặc `REDIS_PASSWORD` sau khi đã chạy `up`** thì volume cũ vẫn giữ mật khẩu cũ và Spring Boot không đăng nhập được DB. Chạy `clean` rồi `up` để khởi tạo lại.
@@ -368,7 +373,11 @@ totp-2fa-authentication/
 Cấu hình hiện tại dành cho **học tập và demo trên máy cá nhân**. Trước khi đưa lên môi trường thật:
 
 - Đổi mật khẩu `1234` của các admin mẫu.
-- File `.env` được copy vào image Spring Boot, vì vậy **không đẩy image `totp-be` lên registry công khai**.
+- JWT được xác thực tập trung trong Spring Security; mọi API cần access token còn hiệu lực và còn tồn tại trong Redis. Chỉ API login và refresh được mở công khai có chủ đích.
+- `JWT_SECRET_BASE64` và `TOTP_MASTER_KEY_V2` bắt buộc lấy từ secrets môi trường, không có khóa mặc định trong mã nguồn. Thay JWT key làm mất hiệu lực phiên hiện hành.
+- Docker Compose nạp `.env` lúc runtime; Dockerfile không sao chép secrets vào image. Hãy tiếp tục bảo vệ file `.env` và không đưa nó vào Git. Không đưa mật khẩu/khóa vào biến `VITE_*`: Vite nhúng các biến này vào JavaScript tải xuống được. Basic Auth credentials đã bị gỡ khỏi frontend; nếu từng dùng các giá trị cũ ở nơi khác, hãy luân chuyển chúng.
+- Các API thử nghiệm thêm/liệt kê admin (`POST/GET /api/web/admin`) và thao tác cache JWT chỉ được đăng ký khi bật Spring profile `dev`; không bật profile này ở môi trường thật.
 - Cổng `8081`, `5374`, `5375` mở cho mọi địa chỉ máy. Chỉ mở Firewall cho mạng tin cậy.
-- Cấu hình Spring Security mặc định đang cho phép mọi request ở mức bộ lọc (chế độ dev); bản chặt hơn có sẵn dưới dạng comment trong `SecurityConfig.java`. Các API 2FA tự kiểm tra header `Authorization: Bearer <accessToken>` và trả `401` khi token sai.
-- Sao lưu `TOTP_MASTER_KEY_V2` ở nơi an toàn và **không commit** file `.env`.
+- Sao lưu `TOTP_MASTER_KEY_V2` ở nơi an toàn; giữ cả `TOTP_MASTER_KEY_V2` và `JWT_SECRET_BASE64` trong secret store ngoài repo.
+- Web hiện vẫn lưu token trong `localStorage`; lỗ hổng XSS có thể đánh cắp token. Dùng HTTPS, CSP nghiêm ngặt và hạn chế script bên thứ ba; hướng production nên chuyển sang BFF/HttpOnly Secure SameSite cookie cùng CSRF protection.
+- Tài khoản demo `1234` và các cổng demo chỉ dành cho môi trường học tập. Bắt buộc đổi thông tin mặc định và cấu hình domain/CORS trước khi triển khai.

@@ -3,12 +3,14 @@ package com.example.be_web_admin.test_controller;
 import com.example.be_web_admin.model.redis.AdminAccessToken;
 import com.example.be_web_admin.repository.redis.AdminAccessTokenRepository;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Profile;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
 import java.util.Map;
 
+@Profile("dev")
 @RestController
 @RequestMapping("/cached/admin-token")
 public class AdminJwtCacheController {

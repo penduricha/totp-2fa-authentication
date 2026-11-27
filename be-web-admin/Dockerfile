@@ -33,9 +33,7 @@ RUN groupadd --system app && useradd --system --gid app --uid 1001 app
 
 COPY --from=build --chown=app:app /out/app.jar /app/app.jar
 
-# App dùng dotenv-java nên BẮT BUỘC có file /app/.env (working directory = /app).
-# Lưu ý: khóa/mật khẩu nằm trong image, không đẩy image này lên registry công khai.
-COPY --chown=app:app .env /app/.env
+# Secrets are injected at runtime by Docker Compose; never copy .env into the image.
 
 USER app
 

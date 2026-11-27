@@ -1,5 +1,5 @@
-# Không loại .env: Dockerfile cần COPY .env vào image (app dùng dotenv-java).
-# Các biến thể khác của .env thì vẫn loại.
+# Never send secrets to the Docker build context or bake them into an image.
+.env
 .env.*
 
 .git
