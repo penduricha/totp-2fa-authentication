@@ -70,9 +70,15 @@ public class CryptoService {
             // nó giữ nguyên chuỗi "${TEN_BIEN}". Bắt riêng trường hợp này để báo đúng nguyên nhân
             // thay vì "is not valid Base64". (Chuỗi bắt đầu bằng "${" không bao giờ là khóa thật
             // nên in ra log không lộ bí mật.)
-            if (base64.trim().startsWith("${")) {
+            String configuredKey = base64.trim();
+            if (configuredKey.startsWith("${")) {
                 throw new IllegalStateException("app.crypto.keys." + version
-                        + " chưa có giá trị: thiếu biến môi trường (đang là '" + base64.trim() + "')");
+                        + " chưa có giá trị: thiếu biến môi trường (đang là '" + configuredKey + "')");
+            }
+            if (configuredKey.toLowerCase(java.util.Locale.ROOT).startsWith("change-me")) {
+                throw new IllegalStateException("app.crypto.keys." + version
+                        + " vẫn là placeholder change-me; đặt Base64 của khóa ngẫu nhiên 32 bytes. "
+                        + "Nếu đã có dữ liệu TOTP, khôi phục khóa gốc thay vì tự sinh khóa mới.");
             }
 
             byte[] key;

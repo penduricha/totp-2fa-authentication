@@ -33,6 +33,13 @@ class AdminJwtTokenProviderTest {
     }
 
     @Test
+    void reportsExamplePlaceholderClearly() {
+        IllegalStateException error = assertThrows(IllegalStateException.class,
+                () -> new AdminJwtTokenProvider("change-me-base64-32-random-bytes"));
+        assertTrue(error.getMessage().contains("JWT_SECRET_BASE64"));
+    }
+
+    @Test
     void rejectsTamperedToken() {
         String token = provider.generateAccessToken(1775L);
         String tampered = token.substring(0, token.length() - 2) + "aa";

@@ -169,7 +169,9 @@ cd totp-2fa-authentication
 .\build-containers.bat init
 ```
 
-> Có thể tham khảo `be-web-admin\.env.example`, nhưng phải thay toàn bộ giá trị `change-me-...` bằng secrets ngẫu nhiên trước khi chạy.
+Linux/macOS: `./build-containers.sh init`. Cả hai lệnh chỉ tạo file `.env` mới, không ghi đè cấu hình/volume hiện có. Lệnh `up` kiểm tra trước rằng password không còn là placeholder và JWT/TOTP key là Base64 chuẩn dài ít nhất 32 byte.
+
+> Có thể tham khảo `be-web-admin\.env.example`, nhưng đây chỉ là mẫu; không chạy stack cho đến khi mọi `change-me-...` được thay bằng secrets ngẫu nhiên hợp lệ.
 
 **Bước 4. Kiểm tra máy rồi chạy:**
 
@@ -234,7 +236,7 @@ Tham số: `-PublicHost <địa chỉ>` (mặc định `localhost`), `-Open`, `-
 
 Tên container: `mariadb`, `redis`, `spring-app`, `vue-web`, `flutter-web`. Dữ liệu nằm trong volume `totp-backend_mariadb-data` và `totp-backend_redis-data`.
 
-Trên Linux/macOS dùng bản tương đương: `./build-containers.sh up`.
+Trên Linux/macOS, cài mới dùng `./build-containers.sh init` một lần rồi `./build-containers.sh up`. Lệnh `init` chỉ tạo `.env` mới khi chưa có file hoặc volume; nó không ghi đè cấu hình/dữ liệu cũ.
 
 ---
 

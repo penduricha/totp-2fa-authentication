@@ -5,8 +5,9 @@
 #
 # Cách dùng:
 #   chmod +x build-containers.sh
-#   ./build-containers.sh up          # build và chạy cả 5 container (mặc định)
-#   ./build-containers.sh build       # chỉ build image, không chạy
+#   ./build-containers.sh init        # tạo .env mới với secrets ngẫu nhiên (chỉ khi chưa có file)
+#   ./build-containers.sh up          # kiểm tra secrets, build và chạy cả 5 container (mặc định)
+#   ./build-containers.sh build       # kiểm tra secrets, chỉ build image, không chạy
 #   ./build-containers.sh down        # dừng và xóa container (giữ dữ liệu DB, Redis)
 #   ./build-containers.sh clean       # như down, nhưng XÓA luôn volume dữ liệu và mạng
 #   ./build-containers.sh restart     # down rồi up
@@ -37,6 +38,99 @@ green()  { printf '\033[32m%s\033[0m\n' "$*"; }
 yellow() { printf '\033[33m%s\033[0m\n' "$*"; }
 step()   { printf '\n\033[1;36m==> %s\033[0m\n' "$*"; }
 
+read_env_value() {
+  local key="$1" envfile="$2" value
+  value="$(awk -F= -v key="$key" '$1 == key { sub(/^[^=]*=/, ""); print; exit }' "$envfile")"
+  value="${value%$'\r'}"
+  printf '%s' "$value"
+}
+
+validate_base64_secret() {
+  local key="$1" envfile="$2" value tmp bytes
+  value="$(read_env_value "$key" "$envfile")"
+  if [[ -z "$value" || "$value" == *change-me* ]]; then
+    red "$key thiếu hoặc vẫn là giá trị mẫu. Tạo khóa Base64 chuẩn bằng: openssl rand -base64 32"
+    if [[ "$key" == TOTP_MASTER_KEY_V2 ]]; then
+      red "Chỉ tạo TOTP_MASTER_KEY_V2 mới khi chắc chắn DB không có credential TOTP; nếu có, phải khôi phục khóa gốc."
+    fi
+    return 1
+  fi
+
+  tmp="$(mktemp)" || return 1
+  if ! printf '%s' "$value" | base64 --decode >"$tmp" 2>/dev/null; then
+    rm -f "$tmp"
+    red "$key không phải Base64 chuẩn. Không dùng Base64 URL-safe (ký tự '-' hoặc '_')."
+    if [[ "$key" == TOTP_MASTER_KEY_V2 ]]; then
+      red "Nếu DB đã có credential TOTP, khôi phục khóa gốc thay vì sinh khóa mới."
+    fi
+    return 1
+  fi
+  bytes="$(wc -c <"$tmp")"
+  rm -f "$tmp"
+  if (( bytes < 32 )); then
+    red "$key giải mã được nhưng chỉ có $bytes bytes; cần ít nhất 32 bytes ngẫu nhiên."
+    return 1
+  fi
+}
+
+validate_env_secrets() {
+  local envfile="$1" key value
+  local valid=1
+  for key in MARIADB_PASSWORD REDIS_PASSWORD; do
+    value="$(read_env_value "$key" "$envfile")"
+    if [[ -z "$value" || "$value" == *change-me* || ${#value} -lt 24 ]]; then
+      red "$key còn thiếu/yếu hoặc vẫn là giá trị mẫu; cần mật khẩu ngẫu nhiên dài ít nhất 24 ký tự."
+      valid=0
+    fi
+  done
+  validate_base64_secret TOTP_MASTER_KEY_V2 "$envfile" || valid=0
+  validate_base64_secret JWT_SECRET_BASE64 "$envfile" || valid=0
+  (( valid == 1 ))
+}
+
+cmd_init() {
+  local envfile="$ROOT/be-web-admin/.env" tmp
+  if [[ -e "$envfile" ]]; then
+    red "Không ghi đè $envfile: file/volume hiện có có thể chứa thông tin đăng nhập và khóa giải mã dữ liệu."
+    red "Với cài đặt đã tồn tại, hãy khôi phục TOTP_MASTER_KEY_V2 gốc; chỉ tạo mới khi chắc chắn chưa có dữ liệu TOTP."
+    return 1
+  fi
+  if docker volume ls -q --filter label=com.docker.compose.project=totp-backend | grep -q .; then
+    red "Đã tồn tại Docker volume của totp-backend; không tự sinh khóa/mật khẩu mới vì có thể làm mất quyền truy cập dữ liệu."
+    return 1
+  fi
+  command -v openssl >/dev/null 2>&1 || { red "Cần cài OpenSSL để sinh secrets ngẫu nhiên."; return 1; }
+
+  local db_password redis_password totp_key jwt_key
+  db_password="$(openssl rand -hex 24)"
+  redis_password="$(openssl rand -hex 24)"
+  totp_key="$(openssl rand -base64 32 | tr -d '\n')"
+  jwt_key="$(openssl rand -base64 32 | tr -d '\n')"
+  umask 077
+  tmp="$(mktemp "$ROOT/be-web-admin/.env.tmp.XXXXXX")" || return 1
+  cat >"$tmp" <<EOF
+# Tự sinh bởi ./build-containers.sh init. Không commit file này.
+IP_ADDRESS=127.0.0.1
+SPRING_BOOT_PORT=8081
+MARIADB_PORT=3307
+MARIADB_DBS=ntt_university
+MARIADB_USERNAME=root
+MARIADB_PASSWORD=$db_password
+REDIS_PORT=6380
+REDIS_USERNAME=default
+REDIS_PASSWORD=$redis_password
+REDIS_DBS=1
+TOTP_MASTER_KEY_V2=$totp_key
+JWT_SECRET_BASE64=$jwt_key
+CORS_ALLOWED_ORIGINS=http://localhost:5374,http://localhost:5375,http://localhost:5173
+AUTH_COOKIE_SECURE=false
+JPA_DDL_AUTO=update
+EOF
+  chmod 600 "$tmp"
+  mv "$tmp" "$envfile"
+  green "Đã tạo $envfile với secrets ngẫu nhiên (quyền truy cập 600). Hãy sao lưu khóa TOTP an toàn."
+}
+
 check_docker() {
   command -v docker >/dev/null 2>&1 || { red "Chưa cài Docker. Cài bằng: sudo apt install -y docker.io docker-compose-v2"; exit 1; }
   docker compose version >/dev/null 2>&1 || { red "Chưa có Docker Compose v2. Cài bằng: sudo apt install -y docker-compose-v2"; exit 1; }
@@ -61,6 +155,7 @@ check_files() {
   for key in MARIADB_PASSWORD MARIADB_DBS REDIS_PASSWORD TOTP_MASTER_KEY_V2 JWT_SECRET_BASE64; do
     grep -Eq "^${key}=.+" "$envfile" || { red "File .env của be-web-admin thiếu hoặc để trống: $key"; exit 1; }
   done
+  validate_env_secrets "$envfile" || exit 1
   [[ -x "$ROOT/be-web-admin/gradlew" || -f "$ROOT/be-web-admin/gradlew" ]] || \
     yellow "Cảnh báo: be-web-admin chưa có gradlew, bước build Spring Boot sẽ lỗi. Chạy 'gradle wrapper' trong thư mục đó."
 }
@@ -146,6 +241,7 @@ main() {
 
   check_docker
   case "$action" in
+    init)    cmd_init ;;
     up)      check_files; check_ports; ensure_network; cmd_up ;;
     build)   check_files; ensure_network; cmd_build ;;
     down)    cmd_down ;;

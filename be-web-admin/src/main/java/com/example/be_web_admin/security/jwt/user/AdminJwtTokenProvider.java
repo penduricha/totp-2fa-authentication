@@ -28,6 +28,10 @@ public class AdminJwtTokenProvider {
     private final SecretKey signingKey;
 
     public AdminJwtTokenProvider(@Value("${app.jwt.secret-base64}") String encodedSecret) {
+        if (encodedSecret != null
+                && encodedSecret.trim().toLowerCase(java.util.Locale.ROOT).startsWith("change-me")) {
+            throw new IllegalStateException("JWT_SECRET_BASE64 is still a change-me placeholder; configure a random Base64 key of at least 32 bytes");
+        }
         final byte[] keyBytes;
         try {
             keyBytes = Base64.getDecoder().decode(encodedSecret);
